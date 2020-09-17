@@ -3,6 +3,7 @@ package targets
 import (
 	"fmt"
 	"net/textproto"
+	"strconv"
 
 	"github.com/hashicorp/boundary/api"
 	"github.com/hashicorp/boundary/api/targets"
@@ -20,7 +21,8 @@ var _ cli.CommandAutocomplete = (*TcpCommand)(nil)
 type TcpCommand struct {
 	*base.Command
 
-	Func string
+	Func            string
+	flagDefaultPort string
 }
 
 func (c *TcpCommand) Synopsis() string {
@@ -28,8 +30,8 @@ func (c *TcpCommand) Synopsis() string {
 }
 
 var tcpFlagsMap = map[string][]string{
-	"create": {"scope-id", "name", "description"},
-	"update": {"id", "name", "description", "version"},
+	"create": {"scope-id", "name", "description", "default-port"},
+	"update": {"id", "name", "description", "version", "default-port"},
 }
 
 func (c *TcpCommand) Help() string {
@@ -63,9 +65,18 @@ func (c *TcpCommand) Help() string {
 func (c *TcpCommand) Flags() *base.FlagSets {
 	set := c.FlagSet(base.FlagSetHTTP | base.FlagSetClient | base.FlagSetOutputFormat)
 
-	if len(tcpFlagsMap[c.Func]) > 0 {
-		f := set.NewFlagSet("Command Options")
-		common.PopulateCommonFlags(c.Command, f, "tcp-type target", tcpFlagsMap[c.Func])
+	f := set.NewFlagSet("Command Options")
+	common.PopulateCommonFlags(c.Command, f, "tcp-type target", tcpFlagsMap[c.Func])
+
+	for _, name := range tcpFlagsMap[c.Func] {
+		switch name {
+		case "default-port":
+			f.StringVar(&base.StringVar{
+				Name:   "default-port",
+				Target: &c.flagDefaultPort,
+				Usage:  "The default port to set on the target.",
+			})
+		}
 	}
 
 	return set
@@ -124,6 +135,19 @@ func (c *TcpCommand) Run(args []string) int {
 		opts = append(opts, targets.WithDescription(c.FlagDescription))
 	}
 
+	switch c.flagDefaultPort {
+	case "":
+	case "null":
+		opts = append(opts, targets.DefaultTcpTargetDefaultPort())
+	default:
+		port, err := strconv.ParseUint(c.flagDefaultPort, 10, 32)
+		if err != nil {
+			c.UI.Error(fmt.Sprintf("Error parsing %q: %s", c.flagDefaultPort, err))
+			return 1
+		}
+		opts = append(opts, targets.WithTcpTargetDefaultPort(uint32(port)))
+	}
+
 	targetClient := targets.NewClient(client)
 
 	// Perform check-and-set when needed
@@ -140,14 +164,14 @@ func (c *TcpCommand) Run(args []string) int {
 		}
 	}
 
-	var catalog *targets.Target
+	var result api.GenericResult
 	var apiErr *api.Error
 
 	switch c.Func {
 	case "create":
-		catalog, apiErr, err = targetClient.Create(c.Context, "tcp", c.FlagScopeId, opts...)
+		result, apiErr, err = targetClient.Create(c.Context, "tcp", c.FlagScopeId, opts...)
 	case "update":
-		catalog, apiErr, err = targetClient.Update(c.Context, c.FlagId, version, opts...)
+		result, apiErr, err = targetClient.Update(c.Context, c.FlagId, version, opts...)
 	}
 
 	plural := "tcp-type target"
@@ -160,11 +184,12 @@ func (c *TcpCommand) Run(args []string) int {
 		return 1
 	}
 
+	target := result.GetItem().(*targets.Target)
 	switch base.Format(c.UI) {
 	case "table":
-		c.UI.Output(generateTargetTableOutput(catalog))
+		c.UI.Output(generateTargetTableOutput(target))
 	case "json":
-		b, err := base.JsonFormatter{}.Format(catalog)
+		b, err := base.JsonFormatter{}.Format(target)
 		if err != nil {
 			c.UI.Error(fmt.Errorf("Error formatting as JSON: %w", err).Error())
 			return 1

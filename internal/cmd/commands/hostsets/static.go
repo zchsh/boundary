@@ -66,10 +66,7 @@ func (c *StaticCommand) Flags() *base.FlagSets {
 	set := c.FlagSet(base.FlagSetHTTP | base.FlagSetClient | base.FlagSetOutputFormat)
 
 	f := set.NewFlagSet("Command Options")
-
-	if len(staticFlagsMap[c.Func]) > 0 {
-		common.PopulateCommonFlags(c.Command, f, "static-type host-set", staticFlagsMap[c.Func])
-	}
+	common.PopulateCommonFlags(c.Command, f, "static-type host-set", staticFlagsMap[c.Func])
 
 	for _, name := range staticFlagsMap[c.Func] {
 		switch name {
@@ -154,14 +151,14 @@ func (c *StaticCommand) Run(args []string) int {
 		}
 	}
 
-	var set *hostsets.HostSet
+	var result api.GenericResult
 	var apiErr *api.Error
 
 	switch c.Func {
 	case "create":
-		set, apiErr, err = hostsetClient.Create(c.Context, c.flagHostCatalogId, opts...)
+		result, apiErr, err = hostsetClient.Create(c.Context, c.flagHostCatalogId, opts...)
 	case "update":
-		set, apiErr, err = hostsetClient.Update(c.Context, c.FlagId, version, opts...)
+		result, apiErr, err = hostsetClient.Update(c.Context, c.FlagId, version, opts...)
 	}
 
 	plural := "static-type host-set"
@@ -174,6 +171,7 @@ func (c *StaticCommand) Run(args []string) int {
 		return 1
 	}
 
+	set := result.GetItem().(*hostsets.HostSet)
 	switch base.Format(c.UI) {
 	case "table":
 		c.UI.Output(generateHostSetTableOutput(set))

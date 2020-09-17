@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/boundary/api/authtokens"
 	"github.com/hashicorp/boundary/internal/cmd/base"
 	"github.com/hashicorp/boundary/internal/cmd/config"
+	"github.com/hashicorp/boundary/internal/db"
 	"github.com/hashicorp/boundary/internal/iam"
 	"github.com/hashicorp/boundary/internal/servers"
 	"github.com/hashicorp/go-hclog"
@@ -116,7 +117,7 @@ func (tc *TestController) Token() *authtokens.AuthToken {
 		tc.t.Error(fmt.Errorf("api err from logging in: %s", pretty.Sprint(apiErr)))
 		return nil
 	}
-	return token
+	return token.Item
 }
 
 func (tc *TestController) addrs(purpose string) []string {
@@ -193,9 +194,11 @@ func (tc *TestController) Shutdown() {
 		if err := tc.b.RunShutdownFuncs(); err != nil {
 			tc.t.Error(err)
 		}
-		if tc.b.DestroyDevDatabase() != nil {
-			if err := tc.b.DestroyDevDatabase(); err != nil {
-				tc.t.Error(err)
+		if !tc.opts.DisableDatabaseDestruction {
+			if tc.b.DestroyDevDatabase() != nil {
+				if err := tc.b.DestroyDevDatabase(); err != nil {
+					tc.t.Error(err)
+				}
 			}
 		}
 	}
@@ -222,6 +225,10 @@ type TestControllerOpts struct {
 	// database
 	DisableDatabaseCreation bool
 
+	// DisableDatabaseDestruction can be set true to allow a database to be
+	// created but examined after-the-fact
+	DisableDatabaseDestruction bool
+
 	// If set, instead of creating a dev database, it will connect to an
 	// existing database given the url
 	DatabaseUrl string
@@ -242,6 +249,10 @@ type TestControllerOpts struct {
 
 	// The recovery KMS to use, or one will be created
 	RecoveryKms wrapping.Wrapper
+
+	// Disables KMS key creation. Only valid when a database url is specified,
+	// at the moment.
+	DisableKmsKeyCreation bool
 
 	// The name to use for the controller, otherwise one will be randomly
 	// generated, unless provided in a non-nil Config
@@ -343,8 +354,21 @@ func NewTestController(t *testing.T, opts *TestControllerOpts) *TestController {
 
 	if opts.DatabaseUrl != "" {
 		tc.b.DatabaseUrl = opts.DatabaseUrl
+		if err := db.InitStore("postgres", nil, tc.b.DatabaseUrl); err != nil {
+			t.Fatal(err)
+		}
 		if err := tc.b.ConnectToDatabase("postgres"); err != nil {
 			t.Fatal(err)
+		}
+		if !opts.DisableKmsKeyCreation {
+			if err := tc.b.CreateGlobalKmsKeys(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !opts.DisableAuthMethodCreation {
+			if err := tc.b.CreateInitialAuthMethod(); err != nil {
+				t.Fatal(err)
+			}
 		}
 	} else if !opts.DisableDatabaseCreation {
 		var createOpts []base.Option
@@ -385,13 +409,15 @@ func (tc *TestController) AddClusterControllerMember(t *testing.T, opts *TestCon
 		opts = new(TestControllerOpts)
 	}
 	nextOpts := &TestControllerOpts{
-		DatabaseUrl:         tc.c.conf.DatabaseUrl,
-		DefaultAuthMethodId: tc.c.conf.DevAuthMethodId,
-		RootKms:             tc.c.conf.RootKms,
-		WorkerAuthKms:       tc.c.conf.WorkerAuthKms,
-		RecoveryKms:         tc.c.conf.RecoveryKms,
-		Name:                opts.Name,
-		Logger:              tc.c.conf.Logger,
+		DatabaseUrl:               tc.c.conf.DatabaseUrl,
+		DefaultAuthMethodId:       tc.c.conf.DevAuthMethodId,
+		RootKms:                   tc.c.conf.RootKms,
+		WorkerAuthKms:             tc.c.conf.WorkerAuthKms,
+		RecoveryKms:               tc.c.conf.RecoveryKms,
+		Name:                      opts.Name,
+		Logger:                    tc.c.conf.Logger,
+		DisableKmsKeyCreation:     true,
+		DisableAuthMethodCreation: true,
 	}
 	if opts.Logger != nil {
 		nextOpts.Logger = opts.Logger

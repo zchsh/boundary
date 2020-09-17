@@ -1,13 +1,13 @@
 package authenticate
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/btcsuite/btcutil/base58"
 	"github.com/hashicorp/boundary/api/authmethods"
 	"github.com/hashicorp/boundary/internal/cmd/base"
 	"github.com/hashicorp/vault/sdk/helper/password"
@@ -135,14 +135,15 @@ func (c *PasswordCommand) Run(args []string) int {
 		return 1
 	}
 
+	token := result.Item
 	switch base.Format(c.UI) {
 	case "table":
 		c.UI.Output(base.WrapForHelpText([]string{
 			"",
 			"Authentication information:",
-			fmt.Sprintf("  Expiration Time: %s", result.ExpirationTime.Local().Format(time.RFC3339)),
-			fmt.Sprintf("  Token:           %s", result.Token),
-			fmt.Sprintf("  User ID:         %s", result.UserId),
+			fmt.Sprintf("  Expiration Time: %s", token.ExpirationTime.Local().Format(time.RFC3339)),
+			fmt.Sprintf("  Token:           %s", token.Token),
+			fmt.Sprintf("  User ID:         %s", token.UserId),
 		}))
 	}
 
@@ -151,12 +152,12 @@ func (c *PasswordCommand) Run(args []string) int {
 		tokenName = c.Command.FlagTokenName
 	}
 	if tokenName != "none" {
-		marshaled, err := json.Marshal(result)
+		marshaled, err := json.Marshal(token)
 		if err != nil {
 			c.UI.Error(fmt.Sprintf("Error marshaling auth token to save to system credential store: %s", err))
 			return 1
 		}
-		if err := keyring.Set("HashiCorp Boundary Auth Token", tokenName, base64.RawStdEncoding.EncodeToString(marshaled)); err != nil {
+		if err := keyring.Set("HashiCorp Boundary Auth Token", tokenName, base58.Encode(marshaled)); err != nil {
 			c.UI.Error(fmt.Sprintf("Error saving auth token to system credential store: %s", err))
 			return 1
 		}

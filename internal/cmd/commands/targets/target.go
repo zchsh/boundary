@@ -2,6 +2,7 @@ package targets
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/hashicorp/boundary/api"
@@ -126,10 +127,7 @@ func (c *Command) Flags() *base.FlagSets {
 	set := c.FlagSet(base.FlagSetHTTP | base.FlagSetClient | base.FlagSetOutputFormat)
 
 	f := set.NewFlagSet("Command Options")
-
-	if len(flagsMap[c.Func]) > 0 {
-		common.PopulateCommonFlags(c.Command, f, resource.Target.String(), flagsMap[c.Func])
-	}
+	common.PopulateCommonFlags(c.Command, f, resource.Target.String(), flagsMap[c.Func])
 
 	for _, name := range flagsMap[c.Func] {
 		switch name {
@@ -215,14 +213,12 @@ func (c *Command) Run(args []string) int {
 	case "set-host-sets":
 		switch len(c.flagHostSets) {
 		case 0:
-		case 1:
-			if c.flagHostSets[0] == "null" {
-				hostSets = []string{}
-			}
-		}
-		if hostSets == nil {
 			c.UI.Error("No host-sets supplied via -host-set")
 			return 1
+		case 1:
+			if c.flagHostSets[0] == "null" {
+				hostSets = nil
+			}
 		}
 	}
 
@@ -243,24 +239,28 @@ func (c *Command) Run(args []string) int {
 
 	targetClient := targets.NewClient(client)
 
-	var existed bool
-	var target *targets.Target
-	var listedCatalogs []*targets.Target
+	existed := true
+	var result api.GenericResult
+	var listResult api.GenericListResult
 	var apiErr *api.Error
 
 	switch c.Func {
 	case "read":
-		target, apiErr, err = targetClient.Read(c.Context, c.FlagId, opts...)
+		result, apiErr, err = targetClient.Read(c.Context, c.FlagId, opts...)
 	case "delete":
-		existed, apiErr, err = targetClient.Delete(c.Context, c.FlagId, opts...)
+		_, apiErr, err = targetClient.Delete(c.Context, c.FlagId, opts...)
+		if apiErr != nil && apiErr.Status == int32(http.StatusNotFound) {
+			existed = false
+			apiErr = nil
+		}
 	case "list":
-		listedCatalogs, apiErr, err = targetClient.List(c.Context, c.FlagScopeId, opts...)
+		listResult, apiErr, err = targetClient.List(c.Context, c.FlagScopeId, opts...)
 	case "add-host-sets":
-		target, apiErr, err = targetClient.AddHostSets(c.Context, c.FlagId, version, c.flagHostSets, opts...)
+		result, apiErr, err = targetClient.AddHostSets(c.Context, c.FlagId, version, hostSets, opts...)
 	case "remove-host-sets":
-		target, apiErr, err = targetClient.RemoveHostSets(c.Context, c.FlagId, version, c.flagHostSets, opts...)
+		result, apiErr, err = targetClient.RemoveHostSets(c.Context, c.FlagId, version, hostSets, opts...)
 	case "set-host-sets":
-		target, apiErr, err = targetClient.SetHostSets(c.Context, c.FlagId, version, c.flagHostSets, opts...)
+		result, apiErr, err = targetClient.SetHostSets(c.Context, c.FlagId, version, hostSets, opts...)
 	}
 
 	plural := "target"
@@ -294,13 +294,14 @@ func (c *Command) Run(args []string) int {
 		return 0
 
 	case "list":
+		listedTargets := listResult.GetItems().([]*targets.Target)
 		switch base.Format(c.UI) {
 		case "json":
-			if len(listedCatalogs) == 0 {
+			if len(listedTargets) == 0 {
 				c.UI.Output("null")
 				return 0
 			}
-			b, err := base.JsonFormatter{}.Format(listedCatalogs)
+			b, err := base.JsonFormatter{}.Format(listedTargets)
 			if err != nil {
 				c.UI.Error(fmt.Errorf("Error formatting as JSON: %w", err).Error())
 				return 1
@@ -308,7 +309,7 @@ func (c *Command) Run(args []string) int {
 			c.UI.Output(string(b))
 
 		case "table":
-			if len(listedCatalogs) == 0 {
+			if len(listedTargets) == 0 {
 				c.UI.Output("No targets found")
 				return 0
 			}
@@ -317,7 +318,7 @@ func (c *Command) Run(args []string) int {
 				"",
 				"Target information:",
 			}
-			for i, m := range listedCatalogs {
+			for i, m := range listedTargets {
 				if i > 0 {
 					output = append(output, "")
 				}
@@ -344,6 +345,7 @@ func (c *Command) Run(args []string) int {
 		return 0
 	}
 
+	target := result.GetItem().(*targets.Target)
 	switch base.Format(c.UI) {
 	case "table":
 		c.UI.Output(generateTargetTableOutput(target))
