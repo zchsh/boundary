@@ -14,7 +14,7 @@ const (
 	Delete           Type = 5
 	Authenticate     Type = 6
 	All              Type = 7
-	Connect          Type = 8
+	Authorize        Type = 8
 	AddGrants        Type = 9
 	RemoveGrants     Type = 10
 	SetGrants        Type = 11
@@ -33,6 +33,10 @@ const (
 	AddHostSets      Type = 24
 	SetHostSets      Type = 25
 	RemoveHostSets   Type = 26
+	Cancel           Type = 27
+	AddAccounts      Type = 28
+	SetAccounts      Type = 29
+	RemoveAccounts   Type = 30
 )
 
 var Map = map[string]Type{
@@ -43,7 +47,7 @@ var Map = map[string]Type{
 	Delete.String():           Delete,
 	Authenticate.String():     Authenticate,
 	All.String():              All,
-	Connect.String():          Connect,
+	Authorize.String():        Authorize,
 	AddGrants.String():        AddGrants,
 	RemoveGrants.String():     RemoveGrants,
 	SetGrants.String():        SetGrants,
@@ -62,6 +66,10 @@ var Map = map[string]Type{
 	AddHostSets.String():      AddHostSets,
 	SetHostSets.String():      SetHostSets,
 	RemoveHostSets.String():   RemoveHostSets,
+	Cancel.String():           Cancel,
+	AddAccounts.String():      AddAccounts,
+	SetAccounts.String():      SetAccounts,
+	RemoveAccounts.String():   RemoveAccounts,
 }
 
 func (a Type) String() string {
@@ -74,7 +82,7 @@ func (a Type) String() string {
 		"delete",
 		"authenticate",
 		"*",
-		"connect",
+		"authorize",
 		"add-grants",
 		"remove-grants",
 		"set-grants",
@@ -93,5 +101,9 @@ func (a Type) String() string {
 		"add-host-sets",
 		"set-host-sets",
 		"remove-host-sets",
+		"cancel",
+		"add-accounts",
+		"set-accounts",
+		"remove-accounts",
 	}[a]
 }

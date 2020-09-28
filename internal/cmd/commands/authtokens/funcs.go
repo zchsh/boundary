@@ -1,7 +1,6 @@
 package authtokens
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/hashicorp/boundary/api/authtokens"
@@ -9,20 +8,26 @@ import (
 )
 
 func generateAuthTokenTableOutput(in *authtokens.AuthToken) string {
-	var ret []string
-	ret = append(ret, []string{
+	nonAttributeMap := map[string]interface{}{
+		"ID":                         in.Id,
+		"Auth Method ID":             in.AuthMethodId,
+		"User ID":                    in.UserId,
+		"Created Time":               in.CreatedTime.Local().Format(time.RFC1123),
+		"Updated Time":               in.UpdatedTime.Local().Format(time.RFC1123),
+		"Expiration Time":            in.ExpirationTime.Local().Format(time.RFC1123),
+		"Approximate Last Used Time": in.ApproximateLastUsedTime.Local().Format(time.RFC1123),
+	}
+
+	maxLength := base.MaxAttributesLength(nonAttributeMap, nil, nil)
+
+	ret := []string{
 		"",
 		"Auth Token information:",
-		fmt.Sprintf("  Approximate Last Used Time: %s", in.ApproximateLastUsedTime.Local().Format(time.RFC3339)),
-		fmt.Sprintf("  Auth Method ID:             %s", in.AuthMethodId),
-		fmt.Sprintf("  Created Time:               %s", in.CreatedTime.Local().Format(time.RFC3339)),
-		fmt.Sprintf("  Expiration Time:            %s", in.ExpirationTime.Local().Format(time.RFC3339)),
-		fmt.Sprintf("  ID:                         %s", in.Id),
-		fmt.Sprintf("  Scope ID:                   %s", in.Scope.Id),
-		fmt.Sprintf("  Updated Time:               %s", in.UpdatedTime.Local().Format(time.RFC3339)),
-		fmt.Sprintf("  User ID:                    %s", in.UserId),
-	}...,
-	)
+		base.WrapMap(2, maxLength+2, nonAttributeMap),
+		"",
+		"  Scope:",
+		base.ScopeInfoForOutput(in.Scope, maxLength),
+	}
 
 	return base.WrapForHelpText(ret)
 }

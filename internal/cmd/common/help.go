@@ -29,12 +29,15 @@ func HelpMap(resType string) map[string]func() string {
 		resource.Scope.String():       "o",
 		resource.AuthToken.String():   "at",
 		resource.AuthMethod.String():  "am",
+		resource.Account.String():     "a",
 		resource.Role.String():        "r",
 		resource.Group.String():       "g",
 		resource.User.String():        "u",
 		resource.HostCatalog.String(): "hc",
 		resource.HostSet.String():     "hs",
 		resource.Host.String():        "h",
+		resource.Session.String():     "s",
+		resource.Target.String():      "t",
 	}
 	return map[string]func() string{
 		"base": func() string {

@@ -24,28 +24,26 @@ type Worker struct {
 	baseCancel  context.CancelFunc
 	started     ua.Bool
 
-	controllerConn    *atomic.Value
-	lastStatusSuccess *atomic.Value
-
-	listeningAddress string
+	controllerStatusConn *atomic.Value
+	lastStatusSuccess    *atomic.Value
 
 	controllerResolver        *atomic.Value
 	controllerResolverCleanup *atomic.Value
 
-	jobInfoMap      *sync.Map
-	cancellationMap *sync.Map
+	controllerSessionConn *atomic.Value
+	sessionInfoMap        *sync.Map
 }
 
 func New(conf *Config) (*Worker, error) {
 	w := &Worker{
 		conf:                      conf,
 		logger:                    conf.Logger.Named("worker"),
-		controllerConn:            new(atomic.Value),
+		controllerStatusConn:      new(atomic.Value),
 		lastStatusSuccess:         new(atomic.Value),
 		controllerResolver:        new(atomic.Value),
 		controllerResolverCleanup: new(atomic.Value),
-		jobInfoMap:                new(sync.Map),
-		cancellationMap:           new(sync.Map),
+		controllerSessionConn:     new(atomic.Value),
+		sessionInfoMap:            new(sync.Map),
 	}
 
 	w.lastStatusSuccess.Store((*LastStatusInformation)(nil))
@@ -128,7 +126,6 @@ func (w *Worker) Shutdown(skipListeners bool) error {
 			return fmt.Errorf("error stopping worker listeners: %w", err)
 		}
 	}
-	w.listeningAddress = ""
 	w.started.Store(false)
 	return nil
 }

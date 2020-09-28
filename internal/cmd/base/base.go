@@ -3,6 +3,7 @@ package base
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,10 +16,8 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/btcsuite/btcutil/base58"
 	"github.com/hashicorp/boundary/api"
 	"github.com/hashicorp/boundary/api/authtokens"
-	"github.com/hashicorp/boundary/sdk/recovery"
 	"github.com/hashicorp/boundary/sdk/wrapper"
 	"github.com/mitchellh/cli"
 	"github.com/pkg/errors"
@@ -30,11 +29,8 @@ const (
 	// maxLineLength is the maximum width of any line.
 	maxLineLength int = 78
 
-	// NotSetValue is a flag value for a not-set value
-	NotSetValue = "(not set)"
-
 	envToken          = "BOUNDARY_TOKEN"
-	envTokenName      = "BOUNDARY_TOKEN_NAME"
+	EnvTokenName      = "BOUNDARY_TOKEN_NAME"
 	envRecoveryConfig = "BOUNDARY_RECOVERY_CONFIG"
 )
 
@@ -73,9 +69,6 @@ type Command struct {
 	FlagName        string
 	FlagDescription string
 	FlagVersion     int
-
-	FlagDevPassthroughDirectory string
-	FlagDevRecoveryKey          string
 
 	client *api.Client
 }
@@ -135,8 +128,7 @@ func (c *Command) Client(opt ...Option) (*api.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	if c.flagAddr != NotSetValue {
+	if c.flagAddr != "" {
 		if err := c.client.SetAddr(c.flagAddr); err != nil {
 			return nil, fmt.Errorf("error setting address on client: %w", err)
 		}
@@ -145,23 +137,23 @@ func (c *Command) Client(opt ...Option) (*api.Client, error) {
 	// If we need custom TLS configuration, then set it
 	var modifiedTLS bool
 	tlsConfig := config.TLSConfig
-	if c.flagTLSCACert != NotSetValue {
+	if c.flagTLSCACert != "" {
 		tlsConfig.CACert = c.flagTLSCACert
 		modifiedTLS = true
 	}
-	if c.flagTLSCAPath != NotSetValue {
+	if c.flagTLSCAPath != "" {
 		tlsConfig.CAPath = c.flagTLSCAPath
 		modifiedTLS = true
 	}
-	if c.flagTLSClientCert != NotSetValue {
+	if c.flagTLSClientCert != "" {
 		tlsConfig.ClientCert = c.flagTLSClientCert
 		modifiedTLS = true
 	}
-	if c.flagTLSClientKey != NotSetValue {
+	if c.flagTLSClientKey != "" {
 		tlsConfig.ClientKey = c.flagTLSClientKey
 		modifiedTLS = true
 	}
-	if c.flagTLSServerName != NotSetValue {
+	if c.flagTLSServerName != "" {
 		tlsConfig.ServerName = c.flagTLSServerName
 		modifiedTLS = true
 	}
@@ -194,17 +186,19 @@ func (c *Command) Client(opt ...Option) (*api.Client, error) {
 		if err := wrapper.Init(c.Context); err != nil {
 			return nil, fmt.Errorf("Error initializing kms: %w", err)
 		}
-		defer func() {
-			if err := wrapper.Finalize(c.Context); err != nil {
-				c.UI.Error(fmt.Errorf("An error was encountered finalizing the kms: %w", err).Error())
-			}
-		}()
-
-		token, err := recovery.GenerateRecoveryToken(c.Context, wrapper)
-		if err != nil {
-			return nil, fmt.Errorf("Error generating recovery config: %w", err)
-		}
-		c.client.SetToken(token)
+		/*
+			// NOTE: ideally we should call this but at the same time we want to
+			give a wrapper to the client, not a token, so it doesn't try to use
+			it for two subsequent calls. This then becomes a question of
+			how/when to finalize the wrapper. Probably it needs to be stored in
+			the base and then at the end of the command run we finalize it if it
+			exists. defer func() {if err := wrapper.Finalize(c.Context); err !=
+			nil {c.UI.Error(fmt.Errorf("An error was encountered finalizing the
+			kms: %w", err).Error())
+			    }
+			}()
+		*/
+		c.client.SetRecoveryKmsWrapper(wrapper)
 
 	case c.FlagToken != "":
 		c.client.SetToken(c.FlagToken)
@@ -213,6 +207,7 @@ func (c *Command) Client(opt ...Option) (*api.Client, error) {
 		if c.FlagTokenName != "" {
 			tokenName = c.FlagTokenName
 		}
+		os.Setenv(EnvTokenName, tokenName)
 		if tokenName != "none" {
 			token, err := keyring.Get("HashiCorp Boundary Auth Token", tokenName)
 			if err != nil {
@@ -224,10 +219,13 @@ func (c *Command) Client(opt ...Option) (*api.Client, error) {
 				token = ""
 			}
 			if token != "" {
-				tokenBytes := base58.Decode(token)
-				if len(tokenBytes) == 0 {
+				tokenBytes, err := base64.RawStdEncoding.DecodeString(token)
+				switch {
+				case err != nil:
+					c.UI.Error(fmt.Errorf("Error base64-unmarshaling stored token from system credential store: %w", err).Error())
+				case len(tokenBytes) == 0:
 					c.UI.Error("Zero length token after decoding stored token from system credential store")
-				} else {
+				default:
 					var authToken authtokens.AuthToken
 					if err := json.Unmarshal(tokenBytes, &authToken); err != nil {
 						c.UI.Error(fmt.Sprintf("Error unmarshaling stored token information after reading from system credential store: %s", err))
@@ -267,7 +265,6 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 			f.StringVar(&StringVar{
 				Name:       FlagNameAddr,
 				Target:     &c.flagAddr,
-				Default:    NotSetValue,
 				EnvVar:     api.EnvBoundaryAddr,
 				Completion: complete.PredictAnything,
 				Usage:      "Addr of the Boundary controller, as a complete URL (e.g. https://boundary.example.com:9200).",
@@ -276,7 +273,6 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 			f.StringVar(&StringVar{
 				Name:       FlagNameCACert,
 				Target:     &c.flagTLSCACert,
-				Default:    NotSetValue,
 				EnvVar:     api.EnvBoundaryCACert,
 				Completion: complete.PredictFiles("*"),
 				Usage: "Path on the local disk to a single PEM-encoded CA " +
@@ -287,7 +283,6 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 			f.StringVar(&StringVar{
 				Name:       FlagNameCAPath,
 				Target:     &c.flagTLSCAPath,
-				Default:    NotSetValue,
 				EnvVar:     api.EnvBoundaryCAPath,
 				Completion: complete.PredictDirs("*"),
 				Usage: "Path on the local disk to a directory of PEM-encoded CA " +
@@ -297,7 +292,6 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 			f.StringVar(&StringVar{
 				Name:       FlagNameClientCert,
 				Target:     &c.flagTLSClientCert,
-				Default:    NotSetValue,
 				EnvVar:     api.EnvBoundaryClientCert,
 				Completion: complete.PredictFiles("*"),
 				Usage: "Path on the local disk to a single PEM-encoded CA " +
@@ -308,7 +302,6 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 			f.StringVar(&StringVar{
 				Name:       FlagNameClientKey,
 				Target:     &c.flagTLSClientKey,
-				Default:    NotSetValue,
 				EnvVar:     api.EnvBoundaryClientKey,
 				Completion: complete.PredictFiles("*"),
 				Usage: "Path on the local disk to a single PEM-encoded private key " +
@@ -318,7 +311,6 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 			f.StringVar(&StringVar{
 				Name:       FlagTLSServerName,
 				Target:     &c.flagTLSServerName,
-				Default:    NotSetValue,
 				EnvVar:     api.EnvBoundaryTLSServerName,
 				Completion: complete.PredictAnything,
 				Usage: "Name to use as the SNI host when connecting to the Boundary " +
@@ -341,7 +333,7 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 			f.StringVar(&StringVar{
 				Name:   "token-name",
 				Target: &c.FlagTokenName,
-				EnvVar: envTokenName,
+				EnvVar: EnvTokenName,
 				Usage:  `If specified, the given value will be used as the name when storing the token in the system credential store. This can allow switching user identities for different commands. Set to "none" to disable storing the token.`,
 			})
 
@@ -362,8 +354,7 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 			f.BoolVar(&BoolVar{
 				Name:   "output-curl-string",
 				Target: &c.flagOutputCurlString,
-				Usage: "Instead of executing the request, print an equivalent cURL " +
-					"command string and exit.",
+				Usage:  "Instead of executing the request, print an equivalent cURL command string and exit.",
 			})
 		}
 
@@ -386,8 +377,7 @@ func (c *Command) FlagSet(bit FlagSetBit) *FlagSets {
 					Default:    "table",
 					EnvVar:     EnvBoundaryCLIFormat,
 					Completion: complete.PredictSet("table", "json", "yaml"),
-					Usage: "Print the output in the given format. Valid formats " +
-						"are \"table\", \"json\", or \"yaml\".",
+					Usage:      "Print the output in the given format. Valid formats are \"table\" or \"json\".",
 				})
 			}
 		}
@@ -433,6 +423,9 @@ func (f *FlagSets) NewFlagSet(name string) *FlagSet {
 
 // Completions returns the completions for this flag set.
 func (f *FlagSets) Completions() complete.Flags {
+	if f == nil {
+		return nil
+	}
 	return f.completions
 }
 

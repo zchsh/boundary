@@ -6,7 +6,6 @@ import (
 	mathrand "math/rand"
 	"time"
 
-	"github.com/btcsuite/btcutil/base58"
 	"github.com/hashicorp/boundary/globals"
 	"github.com/hashicorp/boundary/internal/authtoken/store"
 	"github.com/hashicorp/boundary/internal/db"
@@ -15,6 +14,7 @@ import (
 	wrapping "github.com/hashicorp/go-kms-wrapping"
 	"github.com/hashicorp/go-kms-wrapping/structwrapping"
 	"github.com/hashicorp/vault/sdk/helper/base62"
+	"github.com/mr-tron/base58"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -79,7 +79,7 @@ func (s *AuthToken) decrypt(ctx context.Context, cipher wrapping.Wrapper) error 
 }
 
 const (
-	AuthTokenPrefix = "t"
+	AuthTokenPrefix = "at"
 	// The version prefix is used to differentiate token versions just for future proofing.
 	TokenValueVersionPrefix = "0"
 	tokenLength             = 24
@@ -133,5 +133,7 @@ func EncryptToken(ctx context.Context, kmsCache *kms.Kms, scopeId, publicId, tok
 		return "", fmt.Errorf("error marshaling encrypted token: %w", err)
 	}
 
-	return globals.ServiceTokenV1 + base58.Encode(marshaledBlob), nil
+	encoded := base58.FastBase58Encoding(marshaledBlob)
+
+	return globals.ServiceTokenV1 + encoded, nil
 }

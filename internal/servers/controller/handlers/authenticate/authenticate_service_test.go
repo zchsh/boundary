@@ -2,6 +2,7 @@ package authenticate
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -10,14 +11,13 @@ import (
 	"github.com/hashicorp/boundary/internal/auth/password"
 	"github.com/hashicorp/boundary/internal/authtoken"
 	"github.com/hashicorp/boundary/internal/db"
-	pba "github.com/hashicorp/boundary/internal/gen/controller/api/resources/authtokens"
 	pbs "github.com/hashicorp/boundary/internal/gen/controller/api/services"
 	"github.com/hashicorp/boundary/internal/iam"
 	"github.com/hashicorp/boundary/internal/kms"
+	"github.com/hashicorp/boundary/internal/servers/controller/handlers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -49,7 +49,7 @@ func TestAuthenticate(t *testing.T) {
 	cases := []struct {
 		name    string
 		request *pbs.AuthenticateRequest
-		want    *pbs.AuthenticateResponse
+		wantType string
 		wantErr error
 	}{
 		{
@@ -65,9 +65,22 @@ func TestAuthenticate(t *testing.T) {
 					return &structpb.Struct{Fields: creds}
 				}(),
 			},
-			want: &pbs.AuthenticateResponse{Item: &pba.AuthToken{
+			wantType: "token",
+		},
+		{
+			name: "cookie-type",
+			request: &pbs.AuthenticateRequest{
 				AuthMethodId: am.GetPublicId(),
-			}},
+				TokenType:    "cookie",
+				Credentials: func() *structpb.Struct {
+					creds := map[string]*structpb.Value{
+						"login_name": {Kind: &structpb.Value_StringValue{StringValue: testLoginName}},
+						"password":   {Kind: &structpb.Value_StringValue{StringValue: testPassword}},
+					}
+					return &structpb.Struct{Fields: creds}
+				}(),
+			},
+			wantType: "cookie",
 		},
 		{
 			name: "no-token-type",
@@ -81,9 +94,6 @@ func TestAuthenticate(t *testing.T) {
 					return &structpb.Struct{Fields: creds}
 				}(),
 			},
-			want: &pbs.AuthenticateResponse{Item: &pba.AuthToken{
-				AuthMethodId: am.GetPublicId(),
-			}},
 		},
 		{
 			name: "bad-token-type",
@@ -98,7 +108,7 @@ func TestAuthenticate(t *testing.T) {
 					return &structpb.Struct{Fields: creds}
 				}(),
 			},
-			wantErr: status.Error(codes.InvalidArgument, "invalid argument"),
+			wantErr: handlers.ApiErrorWithCode(codes.InvalidArgument),
 		},
 		{
 			name: "no-authmethod",
@@ -111,7 +121,7 @@ func TestAuthenticate(t *testing.T) {
 					return &structpb.Struct{Fields: creds}
 				}(),
 			},
-			wantErr: status.Error(codes.InvalidArgument, "invalid argument"),
+			wantErr: handlers.ApiErrorWithCode(codes.InvalidArgument),
 		},
 		{
 			name: "wrong-password",
@@ -126,7 +136,7 @@ func TestAuthenticate(t *testing.T) {
 					return &structpb.Struct{Fields: creds}
 				}(),
 			},
-			wantErr: status.Error(codes.Unauthenticated, "unauthenticated"),
+			wantErr: handlers.ApiErrorWithCode(codes.Unauthenticated),
 		},
 		{
 			name: "wrong-login-name",
@@ -141,7 +151,7 @@ func TestAuthenticate(t *testing.T) {
 					return &structpb.Struct{Fields: creds}
 				}(),
 			},
-			wantErr: status.Error(codes.Unauthenticated, "unauthenticated"),
+			wantErr: handlers.ApiErrorWithCode(codes.Unauthenticated),
 		},
 	}
 
@@ -154,7 +164,7 @@ func TestAuthenticate(t *testing.T) {
 			resp, err := s.Authenticate(auth.DisabledAuthTestContext(auth.WithScopeId(o.GetPublicId())), tc.request)
 			if tc.wantErr != nil {
 				assert.Error(err)
-				assert.Equal(status.Code(tc.wantErr), status.Code(err))
+				assert.Truef(errors.Is(err, tc.wantErr), "Got %#v, wanted %#v", err, tc.wantErr)
 				return
 			}
 			require.NoError(err)
@@ -165,6 +175,9 @@ func TestAuthenticate(t *testing.T) {
 			assert.Equal(am.GetPublicId(), aToken.GetAuthMethodId())
 			assert.Equal(aToken.GetCreatedTime(), aToken.GetUpdatedTime())
 			assert.Equal(aToken.GetCreatedTime(), aToken.GetApproximateLastUsedTime())
+			assert.Equal(acct.GetPublicId(), aToken.GetAccountId())
+			assert.Equal(am.GetPublicId(), aToken.GetAuthMethodId())
+			assert.Equal(tc.wantType, resp.GetTokenType())
 		})
 	}
 }
@@ -213,6 +226,7 @@ func TestAuthenticate_AuthAccountConnectedToIamUser(t *testing.T) {
 	aToken := resp.GetItem()
 	assert.Equal(iamUser.GetPublicId(), aToken.GetUserId())
 	assert.Equal(am.GetPublicId(), aToken.GetAuthMethodId())
+	assert.Equal(acct.GetPublicId(), aToken.GetAccountId())
 
 	assert.NotEmpty(aToken.GetId())
 	assert.NotEmpty(aToken.GetToken())

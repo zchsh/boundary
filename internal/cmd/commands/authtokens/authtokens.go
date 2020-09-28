@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/boundary/internal/cmd/common"
 	"github.com/hashicorp/boundary/internal/types/resource"
 	"github.com/hashicorp/boundary/sdk/strutil"
-	"github.com/kr/pretty"
 	"github.com/mitchellh/cli"
 	"github.com/posener/complete"
 )
@@ -94,19 +93,18 @@ func (c *Command) Run(args []string) int {
 	existed := true
 	var result api.GenericResult
 	var listResult api.GenericListResult
-	var apiErr *api.Error
 
 	switch c.Func {
 	case "read":
-		result, apiErr, err = authtokenClient.Read(c.Context, c.FlagId)
+		result, err = authtokenClient.Read(c.Context, c.FlagId)
 	case "delete":
-		_, apiErr, err = authtokenClient.Delete(c.Context, c.FlagId)
-		if apiErr != nil && apiErr.Status == int32(http.StatusNotFound) {
+		_, err = authtokenClient.Delete(c.Context, c.FlagId)
+		if apiErr := api.AsServerError(err); apiErr != nil && apiErr.Status == int32(http.StatusNotFound) {
 			existed = false
-			apiErr = nil
+			err = nil
 		}
 	case "list":
-		listResult, apiErr, err = authtokenClient.List(c.Context, c.FlagScopeId)
+		listResult, err = authtokenClient.List(c.Context, c.FlagScopeId)
 	}
 
 	plural := "auth token"
@@ -114,12 +112,12 @@ func (c *Command) Run(args []string) int {
 		plural = "auth tokens"
 	}
 	if err != nil {
+		if api.AsServerError(err) != nil {
+			c.UI.Error(fmt.Sprintf("Error from controller when performing %s on %s: %s", c.Func, plural, err.Error()))
+			return 1
+		}
 		c.UI.Error(fmt.Sprintf("Error trying to %s %s: %s", c.Func, plural, err.Error()))
 		return 2
-	}
-	if apiErr != nil {
-		c.UI.Error(fmt.Sprintf("Error from controller when performing %s on %s: %s", c.Func, plural, pretty.Sprint(apiErr)))
-		return 1
 	}
 
 	switch c.Func {
@@ -169,13 +167,13 @@ func (c *Command) Run(args []string) int {
 					output = append(output, "")
 				}
 				output = append(output,
-					fmt.Sprintf("  ID:                           %s", t.Id),
-					fmt.Sprintf("    Approximate Last Used Time: %s", t.ApproximateLastUsedTime.Local().Format(time.RFC3339)),
-					fmt.Sprintf("    Auth Method ID:             %s", t.AuthMethodId),
-					fmt.Sprintf("    Created Time:               %s", t.CreatedTime.Local().Format(time.RFC3339)),
-					fmt.Sprintf("    Expiration Time:            %s", t.ExpirationTime.Local().Format(time.RFC3339)),
-					fmt.Sprintf("    Updated Time:               %s", t.UpdatedTime.Local().Format(time.RFC3339)),
-					fmt.Sprintf("    User ID:                    %s", t.UserId),
+					fmt.Sprintf("  ID:                            %s", t.Id),
+					fmt.Sprintf("    Approximate Last Used Time:  %s", t.ApproximateLastUsedTime.Local().Format(time.RFC3339)),
+					fmt.Sprintf("    Auth Method ID:              %s", t.AuthMethodId),
+					fmt.Sprintf("    Created Time:                %s", t.CreatedTime.Local().Format(time.RFC3339)),
+					fmt.Sprintf("    Expiration Time:             %s", t.ExpirationTime.Local().Format(time.RFC3339)),
+					fmt.Sprintf("    Updated Time:                %s", t.UpdatedTime.Local().Format(time.RFC3339)),
+					fmt.Sprintf("    User ID:                     %s", t.UserId),
 				)
 			}
 			c.UI.Output(base.WrapForHelpText(output))

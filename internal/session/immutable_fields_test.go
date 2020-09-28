@@ -120,6 +120,15 @@ func TestState_ImmutableFields(t *testing.T) {
 			fieldMask: []string{"PublicId"},
 		},
 		{
+			name: "status",
+			update: func() *State {
+				s := new.Clone().(*State)
+				s.Status = "active"
+				return s
+			}(),
+			fieldMask: []string{"Status"},
+		},
+		{
 			name: "start time",
 			update: func() *State {
 				s := new.Clone().(*State)
@@ -195,42 +204,6 @@ func TestConnection_ImmutableFields(t *testing.T) {
 			fieldMask: []string{"SessionId"},
 		},
 		{
-			name: "client_tcp_address",
-			update: func() *Connection {
-				c := new.Clone().(*Connection)
-				c.ClientTcpAddress = "0.0.0.0"
-				return c
-			}(),
-			fieldMask: []string{"ClientTcpAddress"},
-		},
-		{
-			name: "client_tcp_port",
-			update: func() *Connection {
-				c := new.Clone().(*Connection)
-				c.ClientTcpPort = 443
-				return c
-			}(),
-			fieldMask: []string{"ClientTcpPort"},
-		},
-		{
-			name: "backend_tcp_address",
-			update: func() *Connection {
-				c := new.Clone().(*Connection)
-				c.BackendTcpAddress = "0.0.0.0"
-				return c
-			}(),
-			fieldMask: []string{"BackendTcpAddress"},
-		},
-		{
-			name: "backend_tcp_port",
-			update: func() *Connection {
-				c := new.Clone().(*Connection)
-				c.BackendTcpPort = 443
-				return c
-			}(),
-			fieldMask: []string{"BackendTcpPort"},
-		},
-		{
 			name: "create time",
 			update: func() *Connection {
 				s := new.Clone().(*Connection)
@@ -293,6 +266,15 @@ func TestConnectionState_ImmutableFields(t *testing.T) {
 				return s
 			}(),
 			fieldMask: []string{"PublicId"},
+		},
+		{
+			name: "status",
+			update: func() *ConnectionState {
+				s := new.Clone().(*ConnectionState)
+				s.Status = "closed"
+				return s
+			}(),
+			fieldMask: []string{"Status"},
 		},
 		{
 			name: "start time",

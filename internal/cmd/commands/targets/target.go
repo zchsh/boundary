@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/boundary/internal/cmd/common"
 	"github.com/hashicorp/boundary/internal/types/resource"
 	"github.com/hashicorp/boundary/sdk/strutil"
-	"github.com/kr/pretty"
 	"github.com/mitchellh/cli"
 	"github.com/posener/complete"
 )
@@ -25,6 +24,7 @@ type Command struct {
 	Func string
 
 	flagHostSets []string
+	flagHostId   string
 }
 
 func (c *Command) Synopsis() string {
@@ -39,6 +39,7 @@ func (c *Command) Synopsis() string {
 }
 
 var flagsMap = map[string][]string{
+	"authorize":        {"id", "host-id"},
 	"read":             {"id"},
 	"delete":           {"id"},
 	"list":             {"scope-id"},
@@ -89,7 +90,7 @@ func (c *Command) Help() string {
 		})
 	case "add-host-sets":
 		helpStr = base.WrapForHelpText([]string{
-			"Usage: boundary target add-host-sets [sub command] [options] [args]",
+			"Usage: boundary target add-host-sets [options] [args]",
 			"",
 			"  This command allows adding host-set resources to target resources. Example:",
 			"",
@@ -99,7 +100,7 @@ func (c *Command) Help() string {
 		})
 	case "remove-host-sets":
 		helpStr = base.WrapForHelpText([]string{
-			"Usage: boundary target remove-host-sets [sub command] [options] [args]",
+			"Usage: boundary target remove-host-sets [options] [args]",
 			"",
 			"  This command allows removing host-set resources from target resources. Example:",
 			"",
@@ -109,13 +110,23 @@ func (c *Command) Help() string {
 		})
 	case "set-host-sets":
 		helpStr = base.WrapForHelpText([]string{
-			"Usage: boundary target set-host-sets [sub command] [options] [args]",
+			"Usage: boundary target set-host-sets [options] [args]",
 			"",
 			"  This command allows setting the complete set of host-set resources on a target resource. Example:",
 			"",
 			"    Set host-set resources on a tcp-type target:",
 			"",
 			`      $ boundary targets set-host-sets -id ttcp_1234567890 -host-set hsst_1234567890`,
+		})
+	case "authorize":
+		helpStr = base.WrapForHelpText([]string{
+			"Usage: boundary target authorize [options] [args]",
+			"",
+			"  This command allows fetching session authorization credentials against a target. Example:",
+			"",
+			"    Set host-set resources on a tcp-type target:",
+			"",
+			`      $ boundary targets authorize -id ttcp_1234567890`,
 		})
 	default:
 		helpStr = helpMap[c.Func]()
@@ -136,6 +147,12 @@ func (c *Command) Flags() *base.FlagSets {
 				Name:   "host-set",
 				Target: &c.flagHostSets,
 				Usage:  "The host-set resources to add, remove, or set. May be specified multiple times.",
+			})
+		case "host-id":
+			f.StringVar(&base.StringVar{
+				Name:   "host-id",
+				Target: &c.flagHostId,
+				Usage:  "The ID of a specific host to connect to out of the hosts from the target's host sets. If not specified, one is chosen at random.",
 			})
 		}
 	}
@@ -220,6 +237,10 @@ func (c *Command) Run(args []string) int {
 				hostSets = nil
 			}
 		}
+	case "authorize":
+		if len(c.flagHostId) != 0 {
+			opts = append(opts, targets.WithHostId(c.flagHostId))
+		}
 	}
 
 	// Perform check-and-set when needed
@@ -242,38 +263,43 @@ func (c *Command) Run(args []string) int {
 	existed := true
 	var result api.GenericResult
 	var listResult api.GenericListResult
-	var apiErr *api.Error
+	var sar *targets.SessionAuthorizationResult
 
 	switch c.Func {
 	case "read":
-		result, apiErr, err = targetClient.Read(c.Context, c.FlagId, opts...)
+		result, err = targetClient.Read(c.Context, c.FlagId, opts...)
 	case "delete":
-		_, apiErr, err = targetClient.Delete(c.Context, c.FlagId, opts...)
-		if apiErr != nil && apiErr.Status == int32(http.StatusNotFound) {
+		_, err = targetClient.Delete(c.Context, c.FlagId, opts...)
+		if apiErr := api.AsServerError(err); apiErr != nil && apiErr.Status == int32(http.StatusNotFound) {
 			existed = false
-			apiErr = nil
+			err = nil
 		}
 	case "list":
-		listResult, apiErr, err = targetClient.List(c.Context, c.FlagScopeId, opts...)
+		listResult, err = targetClient.List(c.Context, c.FlagScopeId, opts...)
 	case "add-host-sets":
-		result, apiErr, err = targetClient.AddHostSets(c.Context, c.FlagId, version, hostSets, opts...)
+		result, err = targetClient.AddHostSets(c.Context, c.FlagId, version, hostSets, opts...)
 	case "remove-host-sets":
-		result, apiErr, err = targetClient.RemoveHostSets(c.Context, c.FlagId, version, hostSets, opts...)
+		result, err = targetClient.RemoveHostSets(c.Context, c.FlagId, version, hostSets, opts...)
 	case "set-host-sets":
-		result, apiErr, err = targetClient.SetHostSets(c.Context, c.FlagId, version, hostSets, opts...)
+		result, err = targetClient.SetHostSets(c.Context, c.FlagId, version, hostSets, opts...)
+	case "authorize":
+		sar, err = targetClient.Authorize(c.Context, c.FlagId, opts...)
 	}
 
 	plural := "target"
-	if c.Func == "list" {
+	switch c.Func {
+	case "list":
 		plural = "targets"
+	case "authorize":
+		plural = "a session against target"
 	}
 	if err != nil {
+		if api.AsServerError(err) != nil {
+			c.UI.Error(fmt.Sprintf("Error from controller when performing %s on %s: %s", c.Func, plural, err.Error()))
+			return 1
+		}
 		c.UI.Error(fmt.Sprintf("Error trying to %s %s: %s", c.Func, plural, err.Error()))
 		return 2
-	}
-	if apiErr != nil {
-		c.UI.Error(fmt.Sprintf("Error from controller when performing %s on %s: %s", c.Func, plural, pretty.Sprint(apiErr)))
-		return 1
 	}
 
 	switch c.Func {
@@ -341,6 +367,21 @@ func (c *Command) Run(args []string) int {
 				}
 			}
 			c.UI.Output(base.WrapForHelpText(output))
+		}
+		return 0
+
+	case "authorize":
+		sa := sar.GetItem().(*targets.SessionAuthorization)
+		switch base.Format(c.UI) {
+		case "table":
+			c.UI.Output(generateAuthorizationTableOutput(sa))
+		case "json":
+			b, err := base.JsonFormatter{}.Format(sa)
+			if err != nil {
+				c.UI.Error(fmt.Errorf("Error formatting as JSON: %w", err).Error())
+				return 1
+			}
+			c.UI.Output(string(b))
 		}
 		return 0
 	}

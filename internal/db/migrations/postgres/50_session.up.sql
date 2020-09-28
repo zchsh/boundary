@@ -63,6 +63,7 @@ begin;
 
   create table session_termination_reason_enm (
     name text primary key
+      constraint only_predefined_session_termination_reasons_allowed
       check (
         name in (
           'unknown',
@@ -131,6 +132,10 @@ begin;
     certificate bytea not null,
     -- after this time the connection will be expired, e.g. forcefully terminated
     expiration_time wt_timestamp, -- maybe null
+    -- limit on number of session connections allowed.  default of 0 equals no limit
+    connection_limit int not null default 1
+      constraint connection_limit_must_be_greater_than_0_or_negative_1
+      check(connection_limit > 0 or connection_limit = -1), 
     -- trust of first use token 
     tofu_token bytea, -- will be null when session is first created
     -- the reason this session ended (null until terminated)
@@ -145,18 +150,21 @@ begin;
       on update cascade,
     version wt_version,
     create_time wt_timestamp,
-    update_time wt_timestamp
+    update_time wt_timestamp,
+    endpoint text -- not part of the warehouse, used to send info to the worker
   );
 
   create trigger 
     immutable_columns
   before
   update on session
-    for each row execute procedure immutable_columns('public_id', 'certificate', 'expiration_time', 'create_time');
+    for each row execute procedure immutable_columns('public_id', 'certificate', 'expiration_time', 'connection_limit', 'create_time', 'endpoint');
   
+  -- session table has some cascades of FK to null, so we need to be careful
+  -- which columns trigger an update of the version column
   create trigger 
     update_version_column 
-  after update on session
+  after update of version, termination_reason, key_id, tofu_token, server_id, server_type on session
     for each row execute procedure update_version_column();
     
   create trigger 
@@ -188,6 +196,8 @@ begin;
         raise exception 'auth_token_id is null';
       when new.scope_id is null then
         raise exception 'scope_id is null';
+      when new.endpoint is null then
+        raise exception 'endpoint is null';
     else
     end case;
     return new;
@@ -226,6 +236,7 @@ begin;
   as $$
   begin
     if new.termination_reason is not null then
+      -- check to see if there are any open connections.
       perform from
         session_connection sc,
         session_connection_state scs
@@ -236,6 +247,18 @@ begin;
       if found then 
         raise 'session %s has existing open connections', new.public_id;
       end if;
+      
+      -- check to see if there's a terminated state already, before inserting a
+      -- new one.
+      perform from
+        session_state ss
+      where
+        ss.session_id = new.public_id and 
+        ss.state = 'terminated';
+      if found then 
+        return new;
+      end if;
+
       insert into session_state (session_id, state)
       values
         (new.public_id, 'terminated');
@@ -251,8 +274,70 @@ begin;
     for each row execute procedure update_session_state_on_termination_reason();
  
 
+  -- cancel_session will insert a cancel state for the session, if there's isn't
+  -- a canceled state already.  It's used by cancel_session_with_null_fk.
+  create or replace function
+    cancel_session(in sessionId text) returns void 
+  as $$
+  declare
+    rows_affected numeric;
+  begin 
+    insert into session_state(session_id, state) 
+    select 
+	    sessionId::text, 'canceling' 
+    from
+      session s
+    where 
+      s.public_id = sessionId::text and
+      s.public_id not in (
+        select 
+          session_id 
+        from 
+          session_state 
+        where 
+          session_id = sessionId::text and 
+          state = 'canceling'
+      ) limit 1;
+      get diagnostics rows_affected = row_count;
+      if rows_affected > 1 then
+          raise exception 'cancel session: more than one row affected: %', rows_affected; 
+      end if;
+  end;
+  $$ language plpgsql;
+
+  -- cancel_session_with_null_fk is intended to be a before update trigger that
+  -- sets the session's state to cancel if a FK is set to null.
+  create or replace function 
+    cancel_session_with_null_fk()
+    returns trigger
+  as $$
+  begin
+   case 
+      when new.user_id is null then
+        perform cancel_session(new.public_id);
+      when new.host_id is null then
+        perform cancel_session(new.public_id);
+      when new.target_id is null then
+        perform cancel_session(new.public_id);
+      when new.host_set_id is null then
+        perform cancel_session(new.public_id);
+      when new.auth_token_id is null then
+        perform cancel_session(new.public_id);
+      when new.scope_id is null then
+        perform cancel_session(new.public_id);
+    end case;
+    return new;
+  end;
+  $$ language plpgsql;
+
+  create trigger 
+    cancel_session_with_null_fk
+  before update of user_id, host_id, target_id, host_set_id, auth_token_id, scope_id on session
+    for each row execute procedure cancel_session_with_null_fk();
+
   create table session_state_enm (
     name text primary key
+      constraint only_predefined_session_states_allowed
       check (
         name in ('pending', 'active', 'canceling', 'terminated')
       )
@@ -323,7 +408,8 @@ begin;
     immutable_columns
   before
   update on session_state
-    for each row execute procedure immutable_columns('session_id', 'start_time', 'previous_end_time');
+    for each row execute procedure immutable_columns('session_id', 'state', 'start_time', 'previous_end_time');
+
     
   create or replace function
     insert_session_state()
@@ -355,5 +441,35 @@ begin;
   create trigger insert_session_state before insert on session_state
     for each row execute procedure insert_session_state();
 
+  create view session_with_state as
+  select
+    s.public_id,
+    s.user_id,
+    s.host_id,
+    s.server_id,
+    s.server_type,
+    s.target_id,
+    s.host_set_id,
+    s.auth_token_id,
+    s.scope_id,
+    s.certificate,
+    s.expiration_time,
+    s.connection_limit,
+    s.tofu_token,
+    s.key_id,
+    s.termination_reason,
+    s.version,
+    s.create_time,
+    s.update_time,
+    s.endpoint,
+    ss.state,
+    ss.previous_end_time,
+    ss.start_time,
+    ss.end_time
+  from  
+    session s,
+    session_state ss
+  where 
+    s.public_id = ss.session_id;
 
 commit;

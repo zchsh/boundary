@@ -13,8 +13,8 @@ import (
 
 	"github.com/hashicorp/boundary/internal/cmd/base"
 	pbs "github.com/hashicorp/boundary/internal/gen/controller/servers/services"
+	"github.com/hashicorp/boundary/internal/libs/alpnmux"
 	"github.com/hashicorp/boundary/internal/servers/controller/handlers/workers"
-	"github.com/hashicorp/go-alpnmux"
 	"github.com/hashicorp/go-multierror"
 	"google.golang.org/grpc"
 )
@@ -120,7 +120,7 @@ func (c *Controller) startListeners() error {
 			grpc.MaxRecvMsgSize(math.MaxInt32),
 			grpc.MaxSendMsgSize(math.MaxInt32),
 		)
-		workerService := workers.NewWorkerServiceServer(c.logger.Named("worker-handler"), c.ServersRepoFn, c.workerStatusUpdateTimes, c.kms, c.jobMap)
+		workerService := workers.NewWorkerServiceServer(c.logger.Named("worker-handler"), c.ServersRepoFn, c.SessionRepoFn, c.workerStatusUpdateTimes, c.kms)
 		pbs.RegisterServerCoordinationServiceServer(workerServer, workerService)
 		pbs.RegisterSessionServiceServer(workerServer, workerService)
 

@@ -29,6 +29,12 @@ func ValidateCreateRequest(i ApiResource, fn CustomValidatorFunc) error {
 	if i.GetId() != "" {
 		badFields["id"] = "This is a read only field."
 	}
+	if i.GetName() != nil {
+		i.GetName().Value = strings.TrimSpace(i.GetName().GetValue())
+	}
+	if i.GetDescription() != nil {
+		i.GetDescription().Value = strings.TrimSpace(i.GetDescription().GetValue())
+	}
 	if i.GetCreatedTime() != nil {
 		badFields["created_time"] = "This is a read only field."
 	}
@@ -42,7 +48,7 @@ func ValidateCreateRequest(i ApiResource, fn CustomValidatorFunc) error {
 		badFields[k] = v
 	}
 	if len(badFields) > 0 {
-		return InvalidArgumentErrorf("Argument errors found in the request.", badFields)
+		return InvalidArgumentErrorf("Error in provided request.", badFields)
 	}
 	return nil
 }
@@ -66,6 +72,22 @@ func ValidateUpdateRequest(prefix string, r UpdateRequest, i ApiResource, fn Cus
 		// the mask will be marked as unset.
 		return nil
 	}
+	if i.GetName() != nil {
+		trimmed := strings.TrimSpace(i.GetName().GetValue())
+		if trimmed == "" {
+			badFields["name"] = "Cannot set empty string as name"
+		} else {
+			i.GetName().Value = trimmed
+		}
+	}
+	if i.GetDescription() != nil {
+		trimmed := strings.TrimSpace(i.GetDescription().GetValue())
+		if trimmed == "" {
+			badFields["name"] = "Cannot set empty string as description"
+		} else {
+			i.GetDescription().Value = trimmed
+		}
+	}
 	if i.GetVersion() == 0 {
 		badFields["version"] = "Existing resource version is required for an update."
 	}
@@ -84,7 +106,7 @@ func ValidateUpdateRequest(prefix string, r UpdateRequest, i ApiResource, fn Cus
 	}
 
 	if len(badFields) > 0 {
-		return InvalidArgumentErrorf("Errors in provided fields.", badFields)
+		return InvalidArgumentErrorf("Error in provided request.", badFields)
 	}
 	return nil
 }
@@ -102,7 +124,7 @@ func ValidateGetRequest(prefix string, r GetRequest, fn CustomValidatorFunc) err
 		badFields[k] = v
 	}
 	if len(badFields) > 0 {
-		return InvalidArgumentErrorf("Improperly formatted identifier.", badFields)
+		return InvalidArgumentErrorf("Error in provided request.", badFields)
 	}
 	return nil
 }
@@ -120,7 +142,7 @@ func ValidateDeleteRequest(prefix string, r DeleteRequest, fn CustomValidatorFun
 		badFields[k] = v
 	}
 	if len(badFields) > 0 {
-		return InvalidArgumentErrorf("Errors in provided fields.", badFields)
+		return InvalidArgumentErrorf("Error in provided request.", badFields)
 	}
 	return nil
 }

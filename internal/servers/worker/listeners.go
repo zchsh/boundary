@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/go-alpnmux"
+	"github.com/hashicorp/boundary/internal/libs/alpnmux"
 	"github.com/hashicorp/go-multierror"
 )
 
@@ -31,10 +31,6 @@ func (w *Worker) startListeners() error {
 				return fmt.Errorf("unknown listener purpose %q", purpose)
 			}
 
-			if w.listeningAddress != "" {
-				return errors.New("more than one listening address found")
-			}
-
 			handler := w.handler(HandlerProperties{
 				ListenerConfig: ln.Config,
 			})
@@ -45,7 +41,6 @@ func (w *Worker) startListeners() error {
 				Handler:           handler,
 				ReadHeaderTimeout: 10 * time.Second,
 				ReadTimeout:       30 * time.Second,
-				IdleTimeout:       5 * time.Minute,
 				ErrorLog:          w.logger.StandardLogger(nil),
 				BaseContext: func(net.Listener) context.Context {
 					return cancelCtx
@@ -70,7 +65,7 @@ func (w *Worker) startListeners() error {
 			ln.Mux.UnregisterProto(alpnmux.DefaultProto)
 			ln.Mux.UnregisterProto(alpnmux.NoProto)
 			l, err := ln.Mux.RegisterProto(alpnmux.DefaultProto, &tls.Config{
-				GetConfigForClient: w.getJobTls,
+				GetConfigForClient: w.getSessionTls,
 			})
 			if err != nil {
 				return fmt.Errorf("error getting tls listener: %w", err)
@@ -82,11 +77,6 @@ func (w *Worker) startListeners() error {
 			servers = append(servers, func() {
 				go server.Serve(l)
 			})
-
-			if w.listeningAddress == "" {
-				w.listeningAddress = l.Addr().String()
-				w.logger.Info("reporting listening address to controllers", "address", w.listeningAddress)
-			}
 		}
 	}
 

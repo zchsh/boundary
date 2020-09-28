@@ -2,10 +2,13 @@ package hosts
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/hashicorp/boundary/internal/auth"
+	"github.com/hashicorp/boundary/internal/db"
 	pb "github.com/hashicorp/boundary/internal/gen/controller/api/resources/hosts"
 	pbs "github.com/hashicorp/boundary/internal/gen/controller/api/services"
 	"github.com/hashicorp/boundary/internal/host"
@@ -16,7 +19,6 @@ import (
 	"github.com/hashicorp/boundary/internal/types/action"
 	"github.com/hashicorp/boundary/internal/types/resource"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -131,7 +133,7 @@ func (s Service) DeleteHost(ctx context.Context, req *pbs.DeleteHostRequest) (*p
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return &pbs.DeleteHostResponse{}, nil
 }
 
 func (s Service) getFromRepo(ctx context.Context, id string) (*pb.Host, error) {
@@ -152,7 +154,7 @@ func (s Service) getFromRepo(ctx context.Context, id string) (*pb.Host, error) {
 func (s Service) createInRepo(ctx context.Context, scopeId, catalogId string, item *pb.Host) (*pb.Host, error) {
 	ha := &pb.StaticHostAttributes{}
 	if err := handlers.StructToProto(item.GetAttributes(), ha); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed converting attributes to subtype proto: %s", err)
+		return nil, handlers.ApiErrorWithCodeAndMessage(codes.Internal, "Failed converting attributes to subtype proto: %s", err)
 	}
 	var opts []static.Option
 	if ha.GetAddress() != nil {
@@ -166,7 +168,7 @@ func (s Service) createInRepo(ctx context.Context, scopeId, catalogId string, it
 	}
 	h, err := static.NewHost(catalogId, opts...)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Unable to build host for creation: %v.", err)
+		return nil, handlers.ApiErrorWithCodeAndMessage(codes.Internal, "Unable to build host for creation: %v.", err)
 	}
 
 	repo, err := s.staticRepoFn()
@@ -175,10 +177,14 @@ func (s Service) createInRepo(ctx context.Context, scopeId, catalogId string, it
 	}
 	out, err := repo.CreateHost(ctx, scopeId, h)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Unable to create host: %v.", err)
+		if db.IsUniqueError(err) || errors.Is(err, db.ErrNotUnique) {
+			// Push this error through so the error interceptor can interpret it correctly.
+			return nil, err
+		}
+		return nil, handlers.ApiErrorWithCodeAndMessage(codes.Internal, "Unable to create host: %v.", err)
 	}
 	if out == nil {
-		return nil, status.Error(codes.Internal, "Unable to create host but no error returned from repository.")
+		return nil, handlers.ApiErrorWithCodeAndMessage(codes.Internal, "Unable to create host but no error returned from repository.")
 	}
 	return toProto(out, nil)
 }
@@ -186,7 +192,7 @@ func (s Service) createInRepo(ctx context.Context, scopeId, catalogId string, it
 func (s Service) updateInRepo(ctx context.Context, scopeId, catalogId, id string, mask []string, item *pb.Host) (*pb.Host, error) {
 	ha := &pb.StaticHostAttributes{}
 	if err := handlers.StructToProto(item.GetAttributes(), ha); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed converting attributes to subtype proto: %s", err)
+		return nil, handlers.ApiErrorWithCodeAndMessage(codes.Internal, "Failed converting attributes to subtype proto: %s", err)
 	}
 	var opts []static.Option
 	if desc := item.GetDescription(); desc != nil {
@@ -200,7 +206,7 @@ func (s Service) updateInRepo(ctx context.Context, scopeId, catalogId, id string
 	}
 	h, err := static.NewHost(catalogId, opts...)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Unable to build host for update: %v.", err)
+		return nil, handlers.ApiErrorWithCodeAndMessage(codes.Internal, "Unable to build host for update: %v.", err)
 	}
 	h.PublicId = id
 	dbMask := maskManager.Translate(mask)
@@ -213,10 +219,10 @@ func (s Service) updateInRepo(ctx context.Context, scopeId, catalogId, id string
 	}
 	out, rowsUpdated, err := repo.UpdateHost(ctx, scopeId, h, item.GetVersion(), dbMask)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Unable to update host: %v.", err)
+		return nil, fmt.Errorf("unable to update host: %w", err)
 	}
 	if rowsUpdated == 0 {
-		return nil, handlers.NotFoundErrorf("Host %q doesn't exist.", id)
+		return nil, handlers.NotFoundErrorf("Host %q doesn't exist or incorrect version provided.", id)
 	}
 	return toProto(out, nil)
 }
@@ -228,7 +234,7 @@ func (s Service) deleteFromRepo(ctx context.Context, scopeId, id string) (bool, 
 	}
 	rows, err := repo.DeleteHost(ctx, scopeId, id)
 	if err != nil {
-		return false, status.Errorf(codes.Internal, "Unable to delete host: %v.", err)
+		return false, fmt.Errorf("unable to delete host: %w", err)
 	}
 	return rows > 0, nil
 }
@@ -313,7 +319,7 @@ func toProto(in *static.Host, members []*static.HostSet) (*pb.Host, error) {
 	}
 	st, err := handlers.ProtoToStruct(&pb.StaticHostAttributes{Address: wrapperspb.String(in.GetAddress())})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Unable to convert static attribute to struct: %s", err)
+		return nil, handlers.ApiErrorWithCodeAndMessage(codes.Internal, "Unable to convert static attribute to struct: %s", err)
 	}
 	out.Attributes = st
 	return &out, nil
@@ -356,6 +362,15 @@ func validateCreateRequest(req *pbs.CreateHostRequest) error {
 				len(attrs.GetAddress().GetValue()) < static.MinHostAddressLength ||
 				len(attrs.GetAddress().GetValue()) > static.MaxHostAddressLength {
 				badFields["attributes.address"] = fmt.Sprintf("Address length must be between %d and %d characters.", static.MinHostAddressLength, static.MaxHostAddressLength)
+			}
+			_, _, err := net.SplitHostPort(attrs.GetAddress().GetValue())
+			switch {
+			case err == nil:
+				badFields["attributes.address"] = "Address for static hosts does not support a port."
+			case strings.Contains(err.Error(), "missing port in address"):
+				// Bare hostname, which we want
+			default:
+				badFields["attributes.address"] = fmt.Sprintf("Error parsing address: %v.", err)
 			}
 		}
 		return badFields

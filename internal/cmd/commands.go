@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/boundary/internal/cmd/commands/authmethods"
 	"github.com/hashicorp/boundary/internal/cmd/commands/authtokens"
 	"github.com/hashicorp/boundary/internal/cmd/commands/config"
-	"github.com/hashicorp/boundary/internal/cmd/commands/controller"
+	"github.com/hashicorp/boundary/internal/cmd/commands/database"
 	"github.com/hashicorp/boundary/internal/cmd/commands/dev"
 	"github.com/hashicorp/boundary/internal/cmd/commands/groups"
 	"github.com/hashicorp/boundary/internal/cmd/commands/hostcatalogs"
@@ -20,9 +20,10 @@ import (
 	"github.com/hashicorp/boundary/internal/cmd/commands/proxy"
 	"github.com/hashicorp/boundary/internal/cmd/commands/roles"
 	"github.com/hashicorp/boundary/internal/cmd/commands/scopes"
+	"github.com/hashicorp/boundary/internal/cmd/commands/server"
+	"github.com/hashicorp/boundary/internal/cmd/commands/sessions"
 	"github.com/hashicorp/boundary/internal/cmd/commands/targets"
 	"github.com/hashicorp/boundary/internal/cmd/commands/users"
-	"github.com/hashicorp/boundary/internal/cmd/commands/worker"
 
 	"github.com/mitchellh/cli"
 )
@@ -32,18 +33,8 @@ var Commands map[string]cli.CommandFactory
 
 func initCommands(ui, serverCmdUi cli.Ui, runOpts *RunOptions) {
 	Commands = map[string]cli.CommandFactory{
-		"controller": func() (cli.Command, error) {
-			return &controller.Command{
-				Server: base.NewServer(&base.Command{
-					UI:         serverCmdUi,
-					ShutdownCh: base.MakeShutdownCh(),
-				}),
-				SighupCh:  MakeSighupCh(),
-				SigUSR2Ch: MakeSigUSR2Ch(),
-			}, nil
-		},
-		"worker": func() (cli.Command, error) {
-			return &worker.Command{
+		"server": func() (cli.Command, error) {
+			return &server.Command{
 				Server: base.NewServer(&base.Command{
 					UI:         serverCmdUi,
 					ShutdownCh: base.MakeShutdownCh(),
@@ -65,6 +56,31 @@ func initCommands(ui, serverCmdUi cli.Ui, runOpts *RunOptions) {
 		"proxy": func() (cli.Command, error) {
 			return &proxy.Command{
 				Command: base.NewCommand(ui),
+				Func:    "proxy",
+			}, nil
+		},
+		"connect": func() (cli.Command, error) {
+			return &proxy.Command{
+				Command: base.NewCommand(ui),
+				Func:    "connect",
+			}, nil
+		},
+		"connect ssh": func() (cli.Command, error) {
+			return &proxy.Command{
+				Command: base.NewCommand(ui),
+				Func:    "ssh",
+			}, nil
+		},
+		"connect rdp": func() (cli.Command, error) {
+			return &proxy.Command{
+				Command: base.NewCommand(ui),
+				Func:    "rdp",
+			}, nil
+		},
+		"connect postgres": func() (cli.Command, error) {
+			return &proxy.Command{
+				Command: base.NewCommand(ui),
+				Func:    "postgres",
 			}, nil
 		},
 
@@ -226,6 +242,23 @@ func initCommands(ui, serverCmdUi cli.Ui, runOpts *RunOptions) {
 			return &config.EncryptDecryptCommand{
 				Command: base.NewCommand(ui),
 				Func:    "decrypt",
+			}, nil
+		},
+		"config get-token": func() (cli.Command, error) {
+			return &config.TokenCommand{
+				Command: base.NewCommand(ui),
+				Func:    "get-token",
+			}, nil
+		},
+
+		"database": func() (cli.Command, error) {
+			return &database.Command{
+				Command: base.NewCommand(ui),
+			}, nil
+		},
+		"database init": func() (cli.Command, error) {
+			return &database.InitCommand{
+				Command: base.NewCommand(ui),
 			}, nil
 		},
 
@@ -553,9 +586,39 @@ func initCommands(ui, serverCmdUi cli.Ui, runOpts *RunOptions) {
 			}, nil
 		},
 
+		"sessions": func() (cli.Command, error) {
+			return &sessions.Command{
+				Command: base.NewCommand(ui),
+			}, nil
+		},
+		"sessions read": func() (cli.Command, error) {
+			return &sessions.Command{
+				Command: base.NewCommand(ui),
+				Func:    "read",
+			}, nil
+		},
+		"sessions list": func() (cli.Command, error) {
+			return &sessions.Command{
+				Command: base.NewCommand(ui),
+				Func:    "list",
+			}, nil
+		},
+		"sessions cancel": func() (cli.Command, error) {
+			return &sessions.Command{
+				Command: base.NewCommand(ui),
+				Func:    "cancel",
+			}, nil
+		},
+
 		"targets": func() (cli.Command, error) {
 			return &targets.Command{
 				Command: base.NewCommand(ui),
+			}, nil
+		},
+		"targets authorize": func() (cli.Command, error) {
+			return &targets.Command{
+				Command: base.NewCommand(ui),
+				Func:    "authorize",
 			}, nil
 		},
 		"targets read": func() (cli.Command, error) {
@@ -652,6 +715,24 @@ func initCommands(ui, serverCmdUi cli.Ui, runOpts *RunOptions) {
 			return &users.Command{
 				Command: base.NewCommand(ui),
 				Func:    "list",
+			}, nil
+		},
+		"users add-accounts": func() (cli.Command, error) {
+			return &users.Command{
+				Command: base.NewCommand(ui),
+				Func:    "add-accounts",
+			}, nil
+		},
+		"users set-accounts": func() (cli.Command, error) {
+			return &users.Command{
+				Command: base.NewCommand(ui),
+				Func:    "set-accounts",
+			}, nil
+		},
+		"users remove-accounts": func() (cli.Command, error) {
+			return &users.Command{
+				Command: base.NewCommand(ui),
+				Func:    "remove-accounts",
 			}, nil
 		},
 	}
