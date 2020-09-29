@@ -7,7 +7,13 @@ import (
 	"github.com/hashicorp/boundary/api"
 	"github.com/hashicorp/boundary/api/accounts"
 	"github.com/hashicorp/boundary/api/authmethods"
+	"github.com/hashicorp/boundary/api/groups"
+	"github.com/hashicorp/boundary/api/hostcatalogs"
+	"github.com/hashicorp/boundary/api/hosts"
+	"github.com/hashicorp/boundary/api/hostsets"
 	"github.com/hashicorp/boundary/api/roles"
+	"github.com/hashicorp/boundary/api/scopes"
+	"github.com/hashicorp/boundary/api/targets"
 	"github.com/hashicorp/boundary/api/users"
 	"github.com/hashicorp/boundary/internal/servers/controller"
 	"github.com/stretchr/testify/assert"
@@ -163,6 +169,71 @@ func TestGrantChecks_Default(t *testing.T) {
 				rc := roles.NewClient(c)
 				_, err = rc.Create(tc.Context(), "global")
 				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
+			},
+		},
+		{
+			name: "create-read-all",
+			grants: []string{"id=*;actions=create,read"},
+			operations: func(t *testing.T, c *api.Client) {
+				sc := scopes.NewClient(c)
+				sr, err := sc.Create(tc.Context(), "global", scopes.WithSkipRoleCreation(true))
+				require.NoError(t, err)
+				_, err = sc.Read(tc.Context(), sr.Item.Id)
+				assert.NoError(t, err)
+
+				amc := authmethods.NewClient(c)
+				amr, err := amc.Create(tc.Context(), "password", sr.Item.Id)
+				require.NoError(t, err)
+				_, err = amc.Read(tc.Context(), amr.Item.Id)
+				assert.NoError(t, err)
+
+				acc := accounts.NewClient(c)
+				acr, err := acc.Create(tc.Context(), amr.Item.Id, accounts.WithPasswordAccountLoginName("something"), accounts.WithPasswordAccountPassword("something"))
+				require.NoError(t, err)
+				_, err = acc.Read(tc.Context(), acr.Item.Id)
+				assert.NoError(t, err)
+
+				uc := users.NewClient(c)
+				ur, err := uc.Create(tc.Context(), sr.Item.Id)
+				require.NoError(t, err)
+				_, err = uc.Read(tc.Context(), ur.Item.Id)
+				assert.NoError(t, err)
+
+				gc := groups.NewClient(c)
+				gr, err := gc.Create(tc.Context(), sr.Item.Id)
+				require.NoError(t, err)
+				_, err = gc.Read(tc.Context(), gr.Item.Id)
+				assert.NoError(t, err)
+
+				hcc := hostcatalogs.NewClient(c)
+				hcr, err := hcc.Create(tc.Context(), "static", sr.Item.Id)
+				require.NoError(t, err)
+				_, err = hcc.Read(tc.Context(), hcr.Item.Id)
+				assert.NoError(t, err)
+
+				hsc := hostsets.NewClient(c)
+				hsr, err := hsc.Create(tc.Context(), hcr.Item.Id)
+				require.NoError(t, err)
+				_, err = hsc.Read(tc.Context(), hsr.Item.Id)
+				assert.NoError(t, err)
+
+				hc := hosts.NewClient(c)
+				hr, err := hc.Create(tc.Context(), hcr.Item.Id)
+				require.NoError(t, err)
+				_, err = hc.Read(tc.Context(), hr.Item.Id)
+				assert.NoError(t, err)
+
+				rc := roles.NewClient(c)
+				rr, err := rc.Create(tc.Context(), sr.Item.Id)
+				require.NoError(t, err)
+				_, err = rc.Read(tc.Context(), rr.Item.Id)
+				assert.NoError(t, err)
+
+				tarC := targets.NewClient(c)
+				tr, err := tarC.Create(tc.Context(),"tcp", sr.Item.Id)
+				require.NoError(t, err)
+				_, err = tarC.Read(tc.Context(), tr.Item.Id)
+				assert.NoError(t, err)
 			},
 		},
 	}
