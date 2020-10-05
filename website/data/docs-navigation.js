@@ -31,10 +31,12 @@ export default [
     content: [
       'api-standards',
       'cli-standards',
+      'permissions',
       'security-model',
       {
         category: 'domain-model',
         content: [
+				  'accounts',
           'actions',
           'auth-methods',
           'grants',
@@ -54,6 +56,7 @@ export default [
       },
     ],
   },
+  '---',
   {
     category: 'configuration',
     content: [
@@ -87,6 +90,7 @@ export default [
       'manage-sessions',
     ],
   },
+  '---',
   {
     category: 'roadmap',
     content: ['0_2_0'],
@@ -101,6 +105,4 @@ export default [
     ],
   },
 
-  '---',
-  { title: 'External Link', href: 'https://www.hashicorp.com' },
 ]
