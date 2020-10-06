@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -126,50 +127,50 @@ func TestGrantChecks_Default(t *testing.T) {
 		grants     []string
 		operations testFunc
 	}{
-		// {
-		// 	name: "create-read-roles",
-		// 	grants: []string{"type=role;actions=create,read"},
-		// 	operations: func(t *testing.T, c *api.Client) {
-		// 		rc := roles.NewClient(c)
-		// 		rr, err := rc.Create(tc.Context(), "global")
-		// 		assert.NoError(t, err)
-		// 		_, err = rc.Read(tc.Context(), rr.Item.Id)
-		// 		assert.NoError(t, err)
-		// 		// Cant do other actions on same type
-		// 		_, err = rc.List(tc.Context(), "global")
-		// 		assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %s, wanted Permission denied error", err)
-		// 		_, err = rc.Update(tc.Context(), rr.Item.Id, 0, roles.WithName("test"), roles.WithAutomaticVersioning(true))
-		// 		assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %s, wanted Permission denied error", err)
-		// 		_, err = rc.Delete(tc.Context(), rr.Item.Id)
-		// 		assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %s, wanted Permission denied error", err)
-		// 		// cant do same actions on different type
-		// 		uc := users.NewClient(c)
-		// 		_, err = uc.Create(tc.Context(), "global")
-		// 		assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %s, wanted Permission denied error", err)
-		// 	},
-		// },
-		// {
-		// 	name: "create-read-users",
-		// 	grants: []string{"type=user;actions=create,read"},
-		// 	operations: func(t *testing.T, c *api.Client) {
-		// 		uc := users.NewClient(c)
-		// 		ur, err := uc.Create(tc.Context(), "global")
-		// 		assert.NoError(t, err)
-		// 		_, err = uc.Read(tc.Context(), ur.Item.Id)
-		// 		assert.NoError(t, err)
-		// 		// Cant do other actions on same type
-		// 		_, err = uc.List(tc.Context(), "global")
-		// 		assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
-		// 		_, err = uc.Update(tc.Context(), ur.Item.Id, 0, users.WithName("test"), users.WithAutomaticVersioning(true))
-		// 		assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
-		// 		_, err = uc.Delete(tc.Context(), ur.Item.Id)
-		// 		assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
-		// 		// cant do same actions on different type
-		// 		rc := roles.NewClient(c)
-		// 		_, err = rc.Create(tc.Context(), "global")
-		// 		assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
-		// 	},
-		// },
+		{
+			name: "create-read-roles",
+			grants: []string{"type=role;actions=create,read"},
+			operations: func(t *testing.T, c *api.Client) {
+				rc := roles.NewClient(c)
+				rr, err := rc.Create(tc.Context(), "global")
+				assert.NoError(t, err)
+				_, err = rc.Read(tc.Context(), rr.Item.Id)
+				assert.NoError(t, err)
+				// Cant do other actions on same type
+				_, err = rc.List(tc.Context(), "global")
+				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %s, wanted Permission denied error", err)
+				_, err = rc.Update(tc.Context(), rr.Item.Id, 0, roles.WithName("test"), roles.WithAutomaticVersioning(true))
+				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %s, wanted Permission denied error", err)
+				_, err = rc.Delete(tc.Context(), rr.Item.Id)
+				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %s, wanted Permission denied error", err)
+				// cant do same actions on different type
+				uc := users.NewClient(c)
+				_, err = uc.Create(tc.Context(), "global")
+				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %s, wanted Permission denied error", err)
+			},
+		},
+		{
+			name: "create-read-users",
+			grants: []string{"type=user;actions=create,read"},
+			operations: func(t *testing.T, c *api.Client) {
+				uc := users.NewClient(c)
+				ur, err := uc.Create(tc.Context(), "global")
+				assert.NoError(t, err)
+				_, err = uc.Read(tc.Context(), ur.Item.Id)
+				assert.NoError(t, err)
+				// Cant do other actions on same type
+				_, err = uc.List(tc.Context(), "global")
+				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
+				_, err = uc.Update(tc.Context(), ur.Item.Id, 0, users.WithName("test"), users.WithAutomaticVersioning(true))
+				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
+				_, err = uc.Delete(tc.Context(), ur.Item.Id)
+				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
+				// cant do same actions on different type
+				rc := roles.NewClient(c)
+				_, err = rc.Create(tc.Context(), "global")
+				assert.True(t, errors.Is(err, api.ErrPermissionDenied), "Got %#v, wanted Permission denied error", err)
+			},
+		},
 		{
 			name: "create-read-all",
 			grants: []string{"id=*;actions=create,read"},
