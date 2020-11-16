@@ -85,7 +85,6 @@ func InitStore(dialect string, cleanup func() error, url string) (bool, error) {
 			}
 		}
 		return false, mErr.ErrorOrNil()
-
 	}
 	if err := m.Up(); err != nil {
 		if err == migrate.ErrNoChange {
