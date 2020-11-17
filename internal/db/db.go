@@ -1,9 +1,7 @@
 package db
 
 import (
-	"errors"
 	"fmt"
-	"os"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/hashicorp/boundary/internal/db/migrations"
@@ -40,25 +38,6 @@ func Open(dbType DbType, connectionUrl string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("unable to open database: %w", err)
 	}
 	return db, nil
-}
-
-// Migrate a database schema
-func Migrate(connectionUrl string, migrationsDirectory string) error {
-	if connectionUrl == "" {
-		return errors.New("connection url is unset")
-	}
-	if _, err := os.Stat(migrationsDirectory); os.IsNotExist(err) {
-		return errors.New("error migrations directory does not exist")
-	}
-	// run migrations
-	m, err := migrate.New(fmt.Sprintf("file://%s", migrationsDirectory), connectionUrl)
-	if err != nil {
-		return fmt.Errorf("unable to create migrations: %w", err)
-	}
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("unable to run migrations: %w", err)
-	}
-	return nil
 }
 
 // InitStore will execute the migrations needed to initialize the store. It
