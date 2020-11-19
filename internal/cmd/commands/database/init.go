@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/hashicorp/boundary/internal/cmd/base"
@@ -248,7 +249,7 @@ func (c *InitCommand) Run(args []string) (retCode int) {
 			c.UI.Error(fmt.Errorf("Error opening database to check init status: %w", err).Error())
 			return 1
 		}
-		_, err = ldb.QueryContext(c.Context, "select version from schema_migrations")
+		_, err = ldb.QueryContext(c.Context, "select version from boundary_schema_migrations")
 		switch {
 		case err == nil:
 			if base.Format(c.UI) == "table" {
@@ -261,7 +262,16 @@ func (c *InitCommand) Run(args []string) (retCode int) {
 			c.UI.Error(fmt.Errorf("Error querying database for init status: %w", err).Error())
 			return 1
 		}
-		ran, err := db.InitStore("postgres", nil, c.srv.DatabaseUrl)
+		initDatabaseUrl, err := url.ParseRequestURI(c.srv.DatabaseUrl)
+		if err != nil {
+			c.UI.Error(fmt.Errorf("Error parsing database url %q status: %w", c.srv.DatabaseUrl, err).Error())
+			return 1
+		}
+		queryValues := initDatabaseUrl.Query()
+		queryValues.Add("x-migrations-table", "boundary_schema_migrations")
+		initDatabaseUrl.RawQuery = queryValues.Encode()
+
+		ran, err := db.InitStore("postgres", nil, initDatabaseUrl.String())
 		if err != nil {
 			c.UI.Error(fmt.Errorf("Error running database migrations: %w", err).Error())
 			return 1
@@ -455,6 +465,13 @@ func (c *InitCommand) ParseFlagsAndConfig(args []string) int {
 		return 1
 	}
 
+	// Validation
+	switch {
+	case len(c.flagConfig) == 0:
+		c.UI.Error("Must specify a config file using -config")
+		return 1
+	}
+
 	wrapperPath := c.flagConfig
 	if c.flagConfigKms != "" {
 		wrapperPath = c.flagConfigKms
@@ -470,13 +487,6 @@ func (c *InitCommand) ParseFlagsAndConfig(args []string) int {
 			c.UI.Error(fmt.Errorf("Could not initialize kms: %w", err).Error())
 			return 1
 		}
-	}
-
-	// Validation
-	switch {
-	case len(c.flagConfig) == 0:
-		c.UI.Error("Must specify a config file using -config")
-		return 1
 	}
 
 	c.Config, err = config.LoadFile(c.flagConfig, wrapper)

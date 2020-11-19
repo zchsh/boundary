@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/hashicorp/boundary/internal/cmd/base"
@@ -197,27 +198,36 @@ func (c *MigrateCommand) Run(args []string) (retCode int) {
 			c.UI.Error(fmt.Errorf("Error opening database to check init status: %w", err).Error())
 			return 1
 		}
-		_, err = ldb.QueryContext(c.Context, "select version from schema_migrations")
+		_, err = ldb.QueryContext(c.Context, "select version from boundary_schema_migrations")
 		switch {
 		case err == nil:
-			if base.Format(c.UI) == "table" {
-				c.UI.Info("Database already initialized.")
-				return 0
-			}
+			// Table exists, maybe we can query it.
 		case errors.IsMissingTableError(err):
 			// Doesn't exist so we continue on
+			if base.Format(c.UI) == "table" {
+				c.UI.Info("Database not initialized. run boundary database init instead.")
+				return 0
+			}
 		default:
 			c.UI.Error(fmt.Errorf("Error querying database for init status: %w", err).Error())
 			return 1
 		}
-		ran, err := db.InitStore("postgres", nil, c.srv.DatabaseUrl)
+		initDatabaseUrl, err := url.ParseRequestURI(c.srv.DatabaseUrl)
+		if err != nil {
+			c.UI.Error(fmt.Errorf("Error parsing database url %q status: %w", c.srv.DatabaseUrl, err).Error())
+			return 1
+		}
+		queryValues := initDatabaseUrl.Query()
+		queryValues.Add("x-migrations-table", "boundary_schema_migrations")
+		initDatabaseUrl.RawQuery = queryValues.Encode()
+		ran, err := db.InitStore("postgres", nil, initDatabaseUrl.String())
 		if err != nil {
 			c.UI.Error(fmt.Errorf("Error running database migrations: %w", err).Error())
 			return 1
 		}
 		if !ran {
 			if base.Format(c.UI) == "table" {
-				c.UI.Info("Database already initialized.")
+				c.UI.Info("Database already up to date. No changes applied.")
 				return 0
 			}
 		}
@@ -231,14 +241,6 @@ func (c *MigrateCommand) Run(args []string) (retCode int) {
 	if err := c.srv.ConnectToDatabase("postgres"); err != nil {
 		c.UI.Error(fmt.Errorf("Error connecting to database after migrations: %w", err).Error())
 		return 1
-	}
-	if err := c.srv.CreateGlobalKmsKeys(c.Context); err != nil {
-		c.UI.Error(fmt.Errorf("Error creating global-scope KMS keys: %w", err).Error())
-		return 1
-	}
-
-	if base.Format(c.UI) == "table" {
-		c.UI.Info("Global-scope KMS keys successfully created.")
 	}
 
 	var jsonMap map[string]interface{}
@@ -268,6 +270,14 @@ func (c *MigrateCommand) ParseFlagsAndConfig(args []string) int {
 		return 1
 	}
 
+
+	// Validation
+	switch {
+	case len(c.flagConfig) == 0:
+		c.UI.Error("Must specify a config file using -config")
+		return 1
+	}
+
 	wrapperPath := c.flagConfig
 	if c.flagConfigKms != "" {
 		wrapperPath = c.flagConfigKms
@@ -285,16 +295,9 @@ func (c *MigrateCommand) ParseFlagsAndConfig(args []string) int {
 		}
 	}
 
-	// Validation
-	switch {
-	case len(c.flagConfig) == 0:
-		c.UI.Error("Must specify a config file using -config")
-		return 1
-	}
-
 	c.Config, err = config.LoadFile(c.flagConfig, wrapper)
 	if err != nil {
-		c.UI.Error("Error parsing config: " + err.Error())
+		c.UI.Error("Eor parsing config `" + c.flagConfig + "' : " + err.Error())
 		return 1
 	}
 

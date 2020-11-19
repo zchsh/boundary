@@ -5357,4 +5357,25 @@ commit;
 
 `),
 	},
+	"migrations/1001_test.down.sql": {
+		name: "1001_test.down.sql",
+		bytes: []byte(`
+begin;
+
+
+commit;
+
+`),
+	},
+	"migrations/1001_test.up.sql": {
+		name: "1001_test.up.sql",
+		bytes: []byte(`
+begin;
+
+create table test_table_for_migration();
+
+commit;
+
+`),
+	},
 }
