@@ -1,11 +1,14 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/hashicorp/boundary/internal/db/migrations"
 	"github.com/hashicorp/boundary/internal/docker"
+	"github.com/hashicorp/boundary/internal/errors"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-multierror"
 	"github.com/jinzhu/gorm"
@@ -38,6 +41,57 @@ func Open(dbType DbType, connectionUrl string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("unable to open database: %w", err)
 	}
 	return db, nil
+}
+
+func VerifyUpToDate(ctx context.Context, db *sql.DB) error {
+	r, err := db.QueryContext(ctx, "select version, dirty from boundary_schema_migrations LIMIT 1")
+	switch {
+	case err == nil:
+		r.Next()
+		var dirty bool
+		var version uint
+		if err := r.Scan(&version, &dirty); err != nil {
+			return fmt.Errorf("Error querying database for status: %w", err)
+		}
+		if dirty {
+			return errors.New(errors.InvalidSchema, errors.WithMsg("A previous migration or initialization of the database has failed. Please restore the database to a good state."))
+		}
+		source, err := migrations.NewMigrationSource("postgres")
+		if err != nil {
+			return fmt.Errorf("Error querying migration state for status: %w", err)
+		}
+		nVer, err := source.Next(version)
+		if err == nil {
+			return errors.New(errors.OutdatedSchema, errors.WithMsg(fmt.Sprintf("Detected version %d which could be updated to %d.", version, nVer)))
+		}
+	case errors.IsMissingTableError(err):
+		return errors.New(errors.DbNotInitialized)
+	default:
+		return fmt.Errorf("Error querying database for status: %w", err)
+	}
+	return nil
+}
+
+func GetSharedLock(ctx context.Context, db *sql.DB) bool {
+	// Ensure no other process is accessing the database.
+	r := db.QueryRowContext(ctx, "SELECT pg_try_advisory_lock_shared(123)")
+	if r.Err() != nil {
+		return false
+	}
+	var gotL bool
+	r.Scan(&gotL)
+	return gotL
+}
+
+func GetExclusiveLock(ctx context.Context, db *sql.DB) bool {
+	// Ensure no other process is accessing the database.
+	r := db.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(123)")
+	if r.Err() != nil {
+		return false
+	}
+	var gotL bool
+	r.Scan(&gotL)
+	return gotL
 }
 
 // InitStore will execute the migrations needed to initialize the store. It

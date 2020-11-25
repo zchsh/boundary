@@ -198,20 +198,30 @@ func (c *MigrateCommand) Run(args []string) (retCode int) {
 			c.UI.Error(fmt.Errorf("Error opening database to check init status: %w", err).Error())
 			return 1
 		}
-		_, err = ldb.QueryContext(c.Context, "select version from boundary_schema_migrations")
+
+		err = db.VerifyUpToDate(c.Context, ldb)
 		switch {
 		case err == nil:
-			// Table exists, maybe we can query it.
-		case errors.IsMissingTableError(err):
+			c.UI.Error("Database is already up to date.")
+			return 0
+		case errors.IsOutdatedSchemaError(err):
+			// The database is outdated, we can continue.
+		case errors.IsNotInitializedError(err):
 			// Doesn't exist so we continue on
 			if base.Format(c.UI) == "table" {
 				c.UI.Info("Database not initialized. run boundary database init instead.")
-				return 0
+				return 1
 			}
 		default:
-			c.UI.Error(fmt.Errorf("Error querying database for init status: %w", err).Error())
+			c.UI.Error(err.Error())
 			return 1
 		}
+
+		if !db.GetExclusiveLock(c.Context, ldb) {
+			c.UI.Error("Cannot run migration. Another service is currently accessing the database.")
+			return 1
+		}
+
 		initDatabaseUrl, err := url.ParseRequestURI(c.srv.DatabaseUrl)
 		if err != nil {
 			c.UI.Error(fmt.Errorf("Error parsing database url %q status: %w", c.srv.DatabaseUrl, err).Error())

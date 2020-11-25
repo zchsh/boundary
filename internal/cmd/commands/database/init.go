@@ -249,19 +249,26 @@ func (c *InitCommand) Run(args []string) (retCode int) {
 			c.UI.Error(fmt.Errorf("Error opening database to check init status: %w", err).Error())
 			return 1
 		}
-		_, err = ldb.QueryContext(c.Context, "select version from boundary_schema_migrations")
+
+		err = db.VerifyUpToDate(c.Context, ldb)
 		switch {
 		case err == nil:
 			if base.Format(c.UI) == "table" {
 				c.UI.Info("Database already initialized.")
 				return 0
 			}
-		case errors.IsMissingTableError(err):
+		case errors.IsNotInitializedError(err):
 			// Doesn't exist so we continue on
 		default:
-			c.UI.Error(fmt.Errorf("Error querying database for init status: %w", err).Error())
+			c.UI.Error(err.Error())
 			return 1
 		}
+
+		if !db.GetExclusiveLock(c.Context, ldb) {
+			c.UI.Error("Cannot initalize the database. Another service is currently accessing the database.")
+			return 1
+		}
+
 		initDatabaseUrl, err := url.ParseRequestURI(c.srv.DatabaseUrl)
 		if err != nil {
 			c.UI.Error(fmt.Errorf("Error parsing database url %q status: %w", c.srv.DatabaseUrl, err).Error())

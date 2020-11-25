@@ -89,3 +89,45 @@ func IsMissingTableError(err error) bool {
 	}
 	return false
 }
+
+func IsNotInitializedError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var domainErr *Err
+	if errors.As(err, &domainErr) {
+		if domainErr.Code == DbNotInitialized {
+			return true
+		}
+	}
+	return false
+}
+
+func IsOutdatedSchemaError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var domainErr *Err
+	if errors.As(err, &domainErr) {
+		if domainErr.Code == OutdatedSchema {
+			return true
+		}
+	}
+	return false
+}
+
+func IsInvalidSchemaError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var domainErr *Err
+	if errors.As(err, &domainErr) {
+		if domainErr.Code == InvalidSchema {
+			return true
+		}
+	}
+	return false
+}

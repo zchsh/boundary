@@ -5362,7 +5362,6 @@ commit;
 		bytes: []byte(`
 begin;
 
-
 commit;
 
 `),
@@ -5372,7 +5371,7 @@ commit;
 		bytes: []byte(`
 begin;
 
-create table test_table_for_migration();
+create table boundary_test_table_for_migration();
 
 commit;
 

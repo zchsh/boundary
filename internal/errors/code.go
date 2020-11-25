@@ -29,7 +29,9 @@ const (
 	NotUnique            Code = 1002 // NotUnique represents a value must be unique error
 	NotSpecificIntegrity Code = 1003 // NotSpecificIntegrity represents an integrity error that has no specificy domain error code
 	MissingTable         Code = 1004 // Missing table represents an undefined table error
-	RecordNotFound       Code = 1100 // RecordNotFound represents that a record/row was not found matching the criteria
-	MultipleRecords      Code = 1101 // MultipleRecords represents that multiple records/rows were found matching the criteria
-
+	RecordNotFound       Code = 1105 // RecordNotFound represents that a record/row was not found matching the criteria
+	MultipleRecords      Code = 1106 // MultipleRecords represents that multiple records/rows were found matching the criteria
+	DbNotInitialized     Code = 1107 // The database has not been initialized
+	OutdatedSchema       Code = 1108 // The database is using a schema older than what is provided by this binary
+	InvalidSchema		Code = 1109 // The database is in an invalid state, probably due to a failed migration or initialization
 )

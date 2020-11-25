@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strings"
@@ -8,6 +9,8 @@ import (
 	"github.com/hashicorp/boundary/globals"
 	"github.com/hashicorp/boundary/internal/cmd/base"
 	"github.com/hashicorp/boundary/internal/cmd/config"
+	"github.com/hashicorp/boundary/internal/db"
+	"github.com/hashicorp/boundary/internal/errors"
 	"github.com/hashicorp/boundary/internal/servers/controller"
 	"github.com/hashicorp/boundary/internal/servers/worker"
 	"github.com/hashicorp/boundary/sdk/wrapper"
@@ -274,6 +277,24 @@ func (c *Command) Run(args []string) int {
 		c.DatabaseUrl = strings.TrimSpace(dbaseUrl)
 		if err := c.ConnectToDatabase("postgres"); err != nil {
 			c.UI.Error(fmt.Errorf("Error connecting to database: %w", err).Error())
+			return 1
+		}
+
+		err = db.VerifyUpToDate(context.Background(), c.Database.DB())
+		switch {
+		case err == nil:
+			// Continue on
+		case errors.IsNotInitializedError(err):
+			c.UI.Error(fmt.Errorf("The Database was not initialized. Run `boundary database init`: %w", err).Error())
+			return 1
+		case errors.IsOutdatedSchemaError(err):
+			c.UI.Error(fmt.Errorf("DB schema is out of date. Run `boundary database migrate`: %w", err).Error())
+		default:
+			c.UI.Error(err.Error())
+			return 1
+		}
+		if !db.GetSharedLock(context.Background(), c.Database.DB()) {
+			c.UI.Error("Cannot start a controller. Another service has exclusive access to the database.")
 			return 1
 		}
 	}
