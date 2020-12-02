@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"runtime"
 	"strings"
@@ -280,7 +279,7 @@ func (c *Command) Run(args []string) int {
 			return 1
 		}
 
-		err = db.VerifyUpToDate(context.Background(), c.Database.DB())
+		err = db.VerifyUpToDate(c.Context, c.Database.DB())
 		switch {
 		case err == nil:
 			// Continue on
@@ -293,7 +292,7 @@ func (c *Command) Run(args []string) int {
 			c.UI.Error(err.Error())
 			return 1
 		}
-		if !db.GetSharedLock(context.Background(), c.Database.DB()) {
+		if !db.GetSharedLock(c.Context, c.Database.DB()) {
 			c.UI.Error("Cannot start a controller. Another service has exclusive access to the database.")
 			return 1
 		}
