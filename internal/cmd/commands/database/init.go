@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/boundary/internal/cmd/base"
 	"github.com/hashicorp/boundary/internal/cmd/config"
 	"github.com/hashicorp/boundary/internal/db"
+	"github.com/hashicorp/boundary/internal/db/migrations"
 	"github.com/hashicorp/boundary/internal/errors"
 	"github.com/hashicorp/boundary/internal/types/scope"
 	"github.com/hashicorp/boundary/sdk/wrapper"
@@ -38,6 +39,7 @@ type InitCommand struct {
 	flagLogLevel                     string
 	flagLogFormat                    string
 	flagMigrationUrl                 string
+	flagAllowDevMigration            bool
 	flagSkipInitialLoginRoleCreation bool
 	flagSkipAuthMethodCreation       bool
 	flagSkipScopesCreation           bool
@@ -118,6 +120,12 @@ func (c *InitCommand) Flags() *base.FlagSets {
 	f = set.NewFlagSet("Init Options")
 
 	f.BoolVar(&base.BoolVar{
+		Name:   "allow-development-migration",
+		Target: &c.flagAllowDevMigration,
+		Usage:  "If set the init will continue even if the schema includes unsafe database update steps that have not been finalized.",
+	})
+
+	f.BoolVar(&base.BoolVar{
 		Name:   "skip-initial-login-role-creation",
 		Target: &c.flagSkipInitialLoginRoleCreation,
 		Usage:  "If not set, a default role allowing necessary grants for logging in will not be created as part of initialization. If set, the recovery KMS will be needed to perform any actions.",
@@ -175,6 +183,15 @@ func (c *InitCommand) Run(args []string) (retCode int) {
 				c.UI.Warn(fmt.Errorf("Error finalizing config kms: %w", err).Error())
 			}
 		}()
+	}
+
+	if migrations.DevMigration != c.flagAllowDevMigration {
+		if migrations.DevMigration {
+			c.UI.Error("This version of the binary has unsafe dev database schema updates.  To proceed anyways please use the 'allow-development-migration' flag.")
+		} else {
+			c.UI.Error("The 'allow-development-migration' flag was set but this binary has no dev database schema updates.")
+		}
+		return 1
 	}
 
 	c.srv = base.NewServer(&base.Command{UI: c.UI})

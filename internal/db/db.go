@@ -94,6 +94,13 @@ func GetExclusiveLock(ctx context.Context, db *sql.DB) bool {
 	return gotL
 }
 
+// DevMigration is true if the database schema that would be applied by InitStore would be from
+// files in the /dev directory which indicates it would not be safe to run in a non dev
+// environment.
+func DevMigration() bool {
+	return migrations.DevMigration
+}
+
 // InitStore will execute the migrations needed to initialize the store. It
 // returns true if migrations actually ran; false if we were already current.
 func InitStore(dialect string, cleanup func() error, url string) (bool, error) {
