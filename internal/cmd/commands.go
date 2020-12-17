@@ -251,10 +251,16 @@ func initCommands(ui, serverCmdUi cli.Ui, runOpts *RunOptions) {
 				Func:    "http",
 			}, nil
 		},
-		"connect ssh": func() (cli.Command, error) {
+		"connect kube": func() (cli.Command, error) {
 			return &connect.Command{
 				Command: base.NewCommand(ui),
-				Func:    "ssh",
+				Func:    "kube",
+			}, nil
+		},
+		"connect postgres": func() (cli.Command, error) {
+			return &connect.Command{
+				Command: base.NewCommand(ui),
+				Func:    "postgres",
 			}, nil
 		},
 		"connect rdp": func() (cli.Command, error) {
@@ -263,10 +269,10 @@ func initCommands(ui, serverCmdUi cli.Ui, runOpts *RunOptions) {
 				Func:    "rdp",
 			}, nil
 		},
-		"connect postgres": func() (cli.Command, error) {
+		"connect ssh": func() (cli.Command, error) {
 			return &connect.Command{
 				Command: base.NewCommand(ui),
-				Func:    "postgres",
+				Func:    "ssh",
 			}, nil
 		},
 

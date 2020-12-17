@@ -80,9 +80,9 @@ func testWrapper(t *testing.T) wrapping.Wrapper {
 func testInitStore(t *testing.T, cleanup func() error, url string) {
 	t.Helper()
 	// run migrations
-	src, err := migrations.NewMigrationSource("postgres")
-	require.NoError(t, err, "Error getting migration source")
-	m, err := migrate.NewWithSourceInstance("postgres", src, url)
+	source, err := migrations.NewMigrationSource("postgres")
+	require.NoError(t, err, "Error creating migration source")
+	m, err := migrate.NewWithSourceInstance("postgres", source, url)
 	require.NoError(t, err, "Error creating migrations")
 
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {

@@ -24,11 +24,7 @@ export default [
     content: [
       {
         category: 'security',
-        content: [
-          'permissions',
-          'data-encryption',
-          'connections-tls',
-        ]
+        content: ['permissions', 'data-encryption', 'connections-tls'],
       },
       {
         category: 'domain-model',
@@ -50,10 +46,7 @@ export default [
   },
   {
     category: 'developing',
-    content: [
-      'building',
-      'ui',
-    ],
+    content: ['building', 'ui'],
   },
   '---',
   {
@@ -61,10 +54,7 @@ export default [
     content: [
       {
         category: 'listener',
-        content: [
-          'tcp',
-          'unix',
-        ],
+        content: ['tcp', 'unix'],
       },
       {
         category: 'kms',
@@ -90,6 +80,7 @@ export default [
       'manage-users-groups',
       'manage-roles',
       'manage-sessions',
+      'workflow-ssh-proxycommand',
     ],
   },
   '---',

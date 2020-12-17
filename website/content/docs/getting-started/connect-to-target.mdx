@@ -37,6 +37,21 @@ different style expected by different SSH clients. At the moment, besides `ssh`
 (the default), the `boundary connect ssh` command supports `-style putty` to
 support passing connection information to PuTTY.
 
+## Selecting Targets
+
+When using `boundary connect` you must identify the target used for connecting.
+Convention in this documentation is to use the target ID as that's a single
+value and most explicit; however, other flags are supported:
+
+- `target-name`: The name of the target
+- `target-scope-id`: The ID of the scope in which the target lives
+- `target-scope-name`: The name of the scope in which the target lives
+
+Note however that these are not uniquely identifying as names can be re-used
+across scopes. As a result, when not using the target ID, you must use the
+target's name in conjunction with the scope name or scope ID so that Boundary
+can correctly identify the desired target.
+
 ## Built-In vs. Exec
 
 Boundary comes with built-in wrappers for popular layer 7 connection protocols,
@@ -45,6 +60,8 @@ such as:
 - `ssh`: defaults to the local SSH client (`ssh`)
 - `postgres`: defaults to the official Postgres CLI client (`psql`)
 - `rdp`: defaults to the built-in Windows RDP client (`mstsc`)
+- `http`: defaults to `curl`
+- `kube`: defaults to `kubectl`
 
 However, `boundary connect` can accommodate executing clients even when there is
 no built-in support for a specific client using `-exec`. The `-exec` flag is a
@@ -114,5 +131,5 @@ $ boundary connect ssh -style putty -exec putty.exe -target-id ttcp_1234567890
 
 ## Next Steps
 
-See our [common workflows](/docs/common-workflows) for in depth discussion on managing scopes, targets, 
+See our [common workflows](/docs/common-workflows) for in depth discussion on managing scopes, targets,
 identities, and sessions.

@@ -37,6 +37,8 @@ import (
 	"nhooyr.io/websocket/wspb"
 )
 
+const sessionCancelTimeout = 10 * time.Second
+
 type SessionInfo struct {
 	Address         string    `json:"address"`
 	Port            int       `json:"port"`
@@ -72,6 +74,9 @@ type Command struct {
 	// HTTP
 	httpFlags
 
+	// Kube
+	kubeFlags
+
 	// Postgres
 	postgresFlags
 
@@ -95,6 +100,7 @@ type Command struct {
 	execCmdReturnValue *atomic.Int32
 	proxyCtx           context.Context
 	proxyCancel        context.CancelFunc
+	outputJsonErrors   bool
 }
 
 func (c *Command) Synopsis() string {
@@ -109,6 +115,8 @@ func (c *Command) Synopsis() string {
 		return rdpSynopsis
 	case "ssh":
 		return sshSynopsis
+	case "kube":
+		return kubeSynopsis
 	default:
 		return ""
 	}
@@ -198,6 +206,15 @@ func (c *Command) Flags() *base.FlagSets {
 		Usage:      "Target scope name, if authorizing the session via scope parameters and target name. Mutually exclusive with -scope-id.",
 	})
 
+	f.BoolVar(&base.BoolVar{
+		Name:       "output-json-errors",
+		Target:     &c.outputJsonErrors,
+		EnvVar:     "BOUNDARY_CONNECT_OUTPUT_JSON_ERRORS",
+		Completion: complete.PredictNothing,
+		Usage:      "Cause errors coming from this command to be output as JSON. This is experimental only and currently only meant for internal purposes. The format may change at any time and this flag/env var may be removed or modified at any time.",
+		Hidden:     true,
+	})
+
 	switch c.Func {
 	case "connect":
 		f.StringVar(&base.StringVar{
@@ -227,6 +244,9 @@ func (c *Command) Flags() *base.FlagSets {
 
 	case "ssh":
 		sshOptions(c, set)
+
+	case "kube":
+		kubeOptions(c, set)
 	}
 
 	return set
@@ -252,31 +272,31 @@ func (c *Command) Run(args []string) (retCode int) {
 	f := c.Flags()
 
 	if err := f.Parse(args); err != nil {
-		c.UI.Error(err.Error())
-		return 1
+		c.Error(err.Error())
+		return 3
 	}
 
 	switch {
 	case c.flagAuthzToken != "":
 		switch {
 		case c.flagTargetId != "":
-			c.UI.Error(`-target-id and -authz-token cannot both be specified`)
-			return 1
+			c.Error(`-target-id and -authz-token cannot both be specified`)
+			return 3
 		case c.flagTargetName != "":
-			c.UI.Error(`-target-name and -authz-token cannot both be specified`)
-			return 1
+			c.Error(`-target-name and -authz-token cannot both be specified`)
+			return 3
 		}
 	default:
 		if c.flagTargetId == "" &&
 			(c.flagTargetName == "" ||
 				(c.FlagScopeId == "" && c.FlagScopeName == "")) {
-			c.UI.Error("Target ID was not passed in, but no combination of target name and scope ID/name was passed in either")
-			return 1
+			c.Error("Target ID was not passed in, but no combination of target name and scope ID/name was passed in either")
+			return 3
 		}
 		if c.flagTargetId != "" &&
 			(c.flagTargetName != "" || c.FlagScopeId != "" || c.FlagScopeName != "") {
-			c.UI.Error("Cannot specify a target ID and also other lookup parameters")
-			return 1
+			c.Error("Cannot specify a target ID and also other lookup parameters")
+			return 3
 		}
 	}
 
@@ -290,13 +310,15 @@ func (c *Command) Run(args []string) (retCode int) {
 			c.flagExec = c.postgresFlags.defaultExec()
 		case "rdp":
 			c.flagExec = c.rdpFlags.defaultExec()
+		case "kube":
+			c.flagExec = c.kubeFlags.defaultExec()
 		}
 	}
 
 	tofuToken, err := base62.Random(20)
 	if err != nil {
-		c.UI.Error(fmt.Errorf("Could not derive random bytes for tofu token: %w", err).Error())
-		return 1
+		c.Error(fmt.Errorf("Could not derive random bytes for tofu token: %w", err).Error())
+		return 2
 	}
 
 	c.connsLeftCh = make(chan int32)
@@ -306,8 +328,8 @@ func (c *Command) Run(args []string) (retCode int) {
 	}
 	listenAddr := net.ParseIP(c.flagListenAddr)
 	if listenAddr == nil {
-		c.UI.Error(fmt.Sprintf("Could not successfully parse listen address of %s", c.flagListenAddr))
-		return 1
+		c.Error(fmt.Sprintf("Could not successfully parse listen address of %s", c.flagListenAddr))
+		return 3
 	}
 
 	authzString := c.flagAuthzToken
@@ -316,19 +338,19 @@ func (c *Command) Run(args []string) (retCode int) {
 		if authzString == "-" {
 			authBytes, err := ioutil.ReadAll(os.Stdin)
 			if err != nil {
-				c.UI.Error(fmt.Errorf("No authorization string was provided and encountered the following error attempting to read it from stdin: %w", err).Error())
-				return 1
+				c.Error(fmt.Errorf("No authorization string was provided and encountered the following error attempting to read it from stdin: %w", err).Error())
+				return 3
 			}
 			if len(authBytes) == 0 {
-				c.UI.Error("No authorization data read from stdin")
-				return 1
+				c.Error("No authorization data read from stdin")
+				return 3
 			}
 			authzString = string(authBytes)
 		}
 
 		if authzString == "" {
-			c.UI.Error("Authorization data was empty")
-			return 1
+			c.Error("Authorization data was empty")
+			return 3
 		}
 
 		if authzString[0] == '{' {
@@ -343,7 +365,7 @@ func (c *Command) Run(args []string) (retCode int) {
 	default:
 		client, err := c.Client()
 		if err != nil {
-			c.UI.Error(fmt.Sprintf("Error creating API client: %s", err.Error()))
+			c.Error(fmt.Sprintf("Error creating API client: %s", err.Error()))
 			return 2
 		}
 		targetClient := targets.NewClient(client)
@@ -365,10 +387,15 @@ func (c *Command) Run(args []string) (retCode int) {
 		sar, err := targetClient.AuthorizeSession(c.Context, c.flagTargetId, opts...)
 		if err != nil {
 			if apiErr := api.AsServerError(err); apiErr != nil {
-				c.UI.Error(fmt.Sprintf("Error from controller when performing authorize-session against target: %s", base.PrintApiError(apiErr)))
+				switch c.outputJsonErrors {
+				case true:
+					c.Error(apiErr.ResponseBody().String())
+				default:
+					c.Error(fmt.Sprintf("Error from controller when performing authorize-session against target: %s", base.PrintApiError(apiErr)))
+				}
 				return 1
 			}
-			c.UI.Error(fmt.Sprintf("Error trying to authorize a session against target: %s", err.Error()))
+			c.Error(fmt.Sprintf("Error trying to authorize a session against target: %s", err.Error()))
 			return 2
 		}
 		authzString = sar.GetItem().(*targets.SessionAuthorization).AuthorizationToken
@@ -376,23 +403,23 @@ func (c *Command) Run(args []string) (retCode int) {
 
 	marshaled, err := base58.FastBase58Decoding(authzString)
 	if err != nil {
-		c.UI.Error(fmt.Errorf("Unable to base58-decode authorization data: %w", err).Error())
-		return 1
+		c.Error(fmt.Errorf("Unable to base58-decode authorization data: %w", err).Error())
+		return 3
 	}
 	if len(marshaled) == 0 {
-		c.UI.Error("Zero length authorization information after decoding")
-		return 1
+		c.Error("Zero length authorization information after decoding")
+		return 3
 	}
 
 	c.sessionAuthzData = new(targetspb.SessionAuthorizationData)
 	if err := proto.Unmarshal(marshaled, c.sessionAuthzData); err != nil {
-		c.UI.Error(fmt.Errorf("Unable to proto-decode authorization data: %w", err).Error())
-		return 1
+		c.Error(fmt.Errorf("Unable to proto-decode authorization data: %w", err).Error())
+		return 3
 	}
 
 	if len(c.sessionAuthzData.GetWorkerInfo()) == 0 {
-		c.UI.Error("No workers found in authorization string")
-		return 1
+		c.Error("No workers found in authorization string")
+		return 3
 	}
 
 	c.connectionsLeft.Store(c.sessionAuthzData.ConnectionLimit)
@@ -400,13 +427,13 @@ func (c *Command) Run(args []string) (retCode int) {
 
 	parsedCert, err := x509.ParseCertificate(c.sessionAuthzData.Certificate)
 	if err != nil {
-		c.UI.Error(fmt.Errorf("Unable to decode mTLS certificate: %w", err).Error())
-		return 1
+		c.Error(fmt.Errorf("Unable to decode mTLS certificate: %w", err).Error())
+		return 3
 	}
 
 	if len(parsedCert.DNSNames) != 1 {
-		c.UI.Error(fmt.Errorf("mTLS certificate has invalid parameters: %w", err).Error())
-		return 1
+		c.Error(fmt.Errorf("mTLS certificate has invalid parameters: %w", err).Error())
+		return 3
 	}
 
 	c.expiration = parsedCert.NotAfter
@@ -445,16 +472,16 @@ func (c *Command) Run(args []string) (retCode int) {
 		Port: c.flagListenPort,
 	})
 	if err != nil {
-		c.UI.Error(fmt.Errorf("Error starting listening port: %w", err).Error())
-		return 1
+		c.Error(fmt.Errorf("Error starting listening port: %w", err).Error())
+		return 2
 	}
 
 	listenerCloseFunc := func() {
 		// Forces the for loop to exist instead of spinning on errors
 		c.connectionsLeft.Store(0)
 		if err := c.listener.Close(); err != nil {
-			c.UI.Error(fmt.Errorf("Error closing listener on shutdown: %w", err).Error())
-			retCode = 1
+			c.Error(fmt.Errorf("Error closing listener on shutdown: %w", err).Error())
+			retCode = 2
 		}
 	}
 
@@ -481,8 +508,8 @@ func (c *Command) Run(args []string) (retCode int) {
 		case "json":
 			out, err := json.Marshal(&sessInfo)
 			if err != nil {
-				c.UI.Error(fmt.Errorf("error marshaling session information: %w", err).Error())
-				return 1
+				c.Error(fmt.Errorf("error marshaling session information: %w", err).Error())
+				return 2
 			}
 			c.UI.Output(string(out))
 		}
@@ -507,19 +534,24 @@ func (c *Command) Run(args []string) (retCode int) {
 					if c.connectionsLeft.Load() == 0 {
 						return
 					}
-					c.UI.Error(fmt.Errorf("Error accepting connection: %w", err).Error())
+					c.Error(fmt.Errorf("Error accepting connection: %w", err).Error())
 					continue
 				}
 			}
 			c.connWg.Add(1)
 			go func() {
 				defer listeningConn.Close()
-				if err := c.handleConnection(
-					listeningConn,
+				defer c.connWg.Done()
+				wsConn, err := c.getWsConn(
+					c.proxyCtx,
 					workerAddr,
-					tofuToken,
-					transport); err != nil {
-					c.UI.Error(err.Error())
+					transport)
+				if err != nil {
+					c.Error(err.Error())
+				} else {
+					if err := c.runTcpProxyV1(wsConn, listeningConn, tofuToken); err != nil {
+						c.Error(err.Error())
+					}
 				}
 			}()
 		}
@@ -563,20 +595,36 @@ func (c *Command) Run(args []string) (retCode int) {
 	}
 
 	termInfo := TerminationInfo{Reason: "Unknown"}
+	sendSessionCancel := false
 	select {
 	case <-c.Context.Done():
 		termInfo.Reason = "Received shutdown signal"
+		sendSessionCancel = true
 	case <-timer.C:
 		termInfo.Reason = "Session has expired"
 	default:
 		if c.execCmdReturnValue != nil {
 			// Don't print out in this case, so ensure we clear it
 			termInfo.Reason = ""
+			sendSessionCancel = true
 		} else {
 			if c.connectionsLeft.Load() == 0 {
 				termInfo.Reason = "No connections left in session"
 			}
 		}
+	}
+
+	if sendSessionCancel {
+		ctx, cancel := context.WithTimeout(context.Background(), sessionCancelTimeout)
+		wsConn, err := c.getWsConn(ctx, workerAddr, transport)
+		if err != nil {
+			c.Error(fmt.Errorf("error fetching connection to send session teardown request to worker: %w", err).Error())
+		} else {
+			if err := c.sendSessionTeardown(ctx, wsConn, tofuToken); err != nil {
+				c.Error(fmt.Errorf("error sending session teardown request to worker: %w", err).Error())
+			}
+		}
+		cancel()
 	}
 
 	if termInfo.Reason != "" {
@@ -586,8 +634,8 @@ func (c *Command) Run(args []string) (retCode int) {
 		case "json":
 			out, err := json.Marshal(&termInfo)
 			if err != nil {
-				c.UI.Error(fmt.Errorf("error marshaling termination information: %w", err).Error())
-				return 1
+				c.Error(fmt.Errorf("error marshaling termination information: %w", err).Error())
+				return 2
 			}
 			c.UI.Output(string(out))
 		}
@@ -596,16 +644,13 @@ func (c *Command) Run(args []string) (retCode int) {
 	return
 }
 
-func (c *Command) handleConnection(
-	listeningConn *net.TCPConn,
+func (c *Command) getWsConn(
+	ctx context.Context,
 	workerAddr string,
-	tofuToken string,
-	transport *http.Transport) error {
-
-	defer c.connWg.Done()
+	transport *http.Transport) (*websocket.Conn, error) {
 
 	conn, resp, err := websocket.Dial(
-		c.proxyCtx,
+		ctx,
 		fmt.Sprintf("wss://%s/v1/proxy", workerAddr),
 		&websocket.DialOptions{
 			HTTPClient: &http.Client{
@@ -617,31 +662,53 @@ func (c *Command) handleConnection(
 	if err != nil {
 		switch {
 		case strings.Contains(err.Error(), "tls: internal error"):
-			return errors.New("Session is unauthorized")
+			return nil, errors.New("Session is unauthorized")
 		case strings.Contains(err.Error(), "connect: connection refused"):
-			return fmt.Errorf("Unable to connect to worker at %s", workerAddr)
+			return nil, fmt.Errorf("Unable to connect to worker at %s", workerAddr)
 		default:
-			return fmt.Errorf("Error dialing the worker: %w", err)
+			return nil, fmt.Errorf("Error dialing the worker: %w", err)
 		}
 	}
 
 	if resp == nil {
-		return errors.New("Response from worker is nil")
+		return nil, errors.New("Response from worker is nil")
 	}
 	if resp.Header == nil {
-		return errors.New("Response header is nil")
+		return nil, errors.New("Response header is nil")
 	}
 	negProto := resp.Header.Get("Sec-WebSocket-Protocol")
 	if negProto != globals.TcpProxyV1 {
-		return fmt.Errorf("Unexpected negotiated protocol: %s", negProto)
+		return nil, fmt.Errorf("Unexpected negotiated protocol: %s", negProto)
+	}
+	return conn, nil
+}
+
+func (c *Command) sendSessionTeardown(
+	ctx context.Context,
+	wsConn *websocket.Conn,
+	tofuToken string) error {
+
+	handshake := proxy.ClientHandshake{
+		TofuToken: tofuToken,
+		Command:   proxy.HANDSHAKECOMMAND_HANDSHAKECOMMAND_SESSION_CANCEL,
+	}
+	if err := wspb.Write(ctx, wsConn, &handshake); err != nil {
+		return fmt.Errorf("error sending teardown handshake to worker: %w", err)
 	}
 
+	return nil
+}
+
+func (c *Command) runTcpProxyV1(
+	wsConn *websocket.Conn,
+	listeningConn *net.TCPConn,
+	tofuToken string) error {
 	handshake := proxy.ClientHandshake{TofuToken: tofuToken}
-	if err := wspb.Write(c.proxyCtx, conn, &handshake); err != nil {
+	if err := wspb.Write(c.proxyCtx, wsConn, &handshake); err != nil {
 		return fmt.Errorf("error sending handshake to worker: %w", err)
 	}
 	var handshakeResult proxy.HandshakeResult
-	if err := wspb.Read(c.proxyCtx, conn, &handshakeResult); err != nil {
+	if err := wspb.Read(c.proxyCtx, wsConn, &handshakeResult); err != nil {
 		switch {
 		case strings.Contains(err.Error(), "unable to authorize connection"):
 			// There's no reason to think we'd be able to authorize any more
@@ -664,7 +731,7 @@ func (c *Command) handleConnection(
 	}
 
 	// Get a wrapped net.Conn so we can use io.Copy
-	netConn := websocket.NetConn(c.proxyCtx, conn, websocket.MessageBinary)
+	netConn := websocket.NetConn(c.proxyCtx, wsConn, websocket.MessageBinary)
 
 	localWg := new(sync.WaitGroup)
 	localWg.Add(2)
@@ -700,7 +767,7 @@ func (c *Command) updateConnsLeft(connsLeft int32) {
 		case "json":
 			out, err := json.Marshal(&connInfo)
 			if err != nil {
-				c.UI.Error(fmt.Errorf("error marshaling connection information: %w", err).Error())
+				c.Error(fmt.Errorf("error marshaling connection information: %w", err).Error())
 			}
 			c.UI.Output(string(out))
 		}
@@ -719,7 +786,13 @@ func (c *Command) handleExec(passthroughArgs []string) {
 
 	switch c.Func {
 	case "http":
-		args = append(args, c.httpFlags.buildArgs(c, port, ip, addr)...)
+		httpArgs, err := c.httpFlags.buildArgs(c, port, ip, addr)
+		if err != nil {
+			c.Error(fmt.Sprintf("Error parsing session args: %s", err))
+			c.execCmdReturnValue.Store(int32(3))
+			return
+		}
+		args = append(args, httpArgs...)
 
 	case "postgres":
 		args = append(args, c.postgresFlags.buildArgs(c, port, ip, addr)...)
@@ -729,6 +802,15 @@ func (c *Command) handleExec(passthroughArgs []string) {
 
 	case "ssh":
 		args = append(args, c.sshFlags.buildArgs(c, port, ip, addr)...)
+
+	case "kube":
+		kubeArgs, err := c.kubeFlags.buildArgs(c, port, ip, addr)
+		if err != nil {
+			c.Error(fmt.Sprintf("Error parsing session args: %s", err))
+			c.execCmdReturnValue.Store(int32(3))
+			return
+		}
+		args = append(args, kubeArgs...)
 	}
 
 	args = append(passthroughArgs, args...)
@@ -778,9 +860,18 @@ func (c *Command) handleExec(passthroughArgs []string) {
 			}
 		}
 
-		c.UI.Error(fmt.Sprintf("Failed to run command: %s", err))
+		c.Error(fmt.Sprintf("Failed to run command: %s", err))
 		c.execCmdReturnValue.Store(int32(exitCode))
 		return
 	}
 	c.execCmdReturnValue.Store(0)
+}
+
+func (c *Command) Error(err string) {
+	switch c.outputJsonErrors {
+	case true:
+		c.UI.Error(fmt.Sprintf(`{"error": %q}`, err))
+	default:
+		c.UI.Error(err)
+	}
 }
