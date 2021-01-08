@@ -6,7 +6,8 @@ import (
 )
 
 var (
-	StartDbInDocker func(string) (func() error, string, string, error) = startDbInDockerUnsupported
+	GetInitializedDb = startDbInDockerUnsupported
+	StartDbInDocker  = startDbInDockerUnsupported
 
 	ErrDockerUnsupported = errors.New("docker is not currently supported on this platform")
 

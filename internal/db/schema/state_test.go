@@ -11,7 +11,8 @@ import (
 )
 
 func TestState(t *testing.T) {
-	c, u, _, err := docker.StartDbInDocker("postgres")
+	dialect := "postgres"
+	c, u, _, err := docker.StartDbInDocker(dialect)
 	t.Cleanup(func() {
 		if err := c(); err != nil {
 			t.Fatalf("Got error at cleanup: %v", err)
@@ -22,13 +23,13 @@ func TestState(t *testing.T) {
 		require.NoError(t, c())
 	})
 	ctx := context.Background()
-	d, err := sql.Open("postgres", u)
+	d, err := sql.Open(dialect, u)
 	require.NoError(t, err)
 
-	m, err := NewManager(ctx, "postgres", d)
+	m, err := NewManager(ctx, dialect, d)
 	require.NoError(t, err)
 	want := &State{
-		BinarySchemaVersion: BinarySchemaVersion("postgres"),
+		BinarySchemaVersion: BinarySchemaVersion(dialect),
 	}
 	s, err := m.State(ctx)
 	require.NoError(t, err)
@@ -40,7 +41,7 @@ func TestState(t *testing.T) {
 
 	want = &State{
 		InitializationStarted: true,
-		BinarySchemaVersion:   BinarySchemaVersion("postgres"),
+		BinarySchemaVersion:   BinarySchemaVersion(dialect),
 		Dirty:                 true,
 		CurrentSchemaVersion:  2,
 	}

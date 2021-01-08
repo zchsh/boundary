@@ -453,7 +453,7 @@ func (b *Server) CreateDevDatabase(dialect string, opt ...Option) error {
 
 	switch b.DatabaseUrl {
 	case "":
-		c, url, container, err = docker.StartDbInDocker(dialect)
+		c, url, container, err = docker.GetInitializedDb(dialect)
 		// In case of an error, run the cleanup function.  If we pass all errors, c should be set to a noop
 		// function before returning from this method
 		defer func() {

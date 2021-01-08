@@ -10,17 +10,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSetup(t *testing.T) {
+	_, _, _, err := docker.StartDbInDocker("postgres")
+	require.NoError(t, err)
+}
+
 func TestRollForward(t *testing.T) {
-	c, u, _, err := docker.StartDbInDocker("postgres")
+	dialect := "postgres"
+	c, u, _, err := docker.StartDbInDocker(dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
 	})
-	d, err := sql.Open("postgres", u)
+	d, err := sql.Open(dialect, u)
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	m, err := NewManager(ctx, "postgres", d)
+	m, err := NewManager(ctx, dialect, d)
 	require.NoError(t, err)
 	assert.NoError(t, m.RollForward(ctx))
 
@@ -52,7 +58,7 @@ func TestRollForward_NotFromFresh(t *testing.T) {
 	}
 	migrationStates[dialect] = nState
 
-	c, u, _, err := docker.StartDbInDocker("postgres")
+	c, u, _, err := docker.StartDbInDocker(dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
@@ -84,20 +90,21 @@ func TestRollForward_NotFromFresh(t *testing.T) {
 }
 
 func TestManager_ExclusiveLock(t *testing.T) {
-	c, u, _, err := docker.StartDbInDocker("postgres")
+	dialect := "postgres"
+	c, u, _, err := docker.StartDbInDocker(dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
 	})
 	ctx := context.TODO()
-	d1, err := sql.Open("postgres", u)
+	d1, err := sql.Open(dialect, u)
 	require.NoError(t, err)
-	m1, err := NewManager(ctx, "postgres", d1)
+	m1, err := NewManager(ctx, dialect, d1)
 	require.NoError(t, err)
 
-	d2, err := sql.Open("postgres", u)
+	d2, err := sql.Open(dialect, u)
 	require.NoError(t, err)
-	m2, err := NewManager(ctx, "postgres", d2)
+	m2, err := NewManager(ctx, dialect, d2)
 	require.NoError(t, err)
 
 	assert.NoError(t, m1.ExclusiveLock(ctx, 123))
@@ -106,20 +113,21 @@ func TestManager_ExclusiveLock(t *testing.T) {
 }
 
 func TestManager_SharedLock(t *testing.T) {
-	c, u, _, err := docker.StartDbInDocker("postgres")
+	dialect := "postgres"
+	c, u, _, err := docker.StartDbInDocker(dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
 	})
 	ctx := context.TODO()
-	d1, err := sql.Open("postgres", u)
+	d1, err := sql.Open(dialect, u)
 	require.NoError(t, err)
-	m1, err := NewManager(ctx, "postgres", d1)
+	m1, err := NewManager(ctx, dialect, d1)
 	require.NoError(t, err)
 
-	d2, err := sql.Open("postgres", u)
+	d2, err := sql.Open(dialect, u)
 	require.NoError(t, err)
-	m2, err := NewManager(ctx, "postgres", d2)
+	m2, err := NewManager(ctx, dialect, d2)
 	require.NoError(t, err)
 
 	assert.NoError(t, m1.SharedLock(ctx, 123))
