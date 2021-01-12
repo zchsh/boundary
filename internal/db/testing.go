@@ -26,10 +26,11 @@ func TestSetup(t *testing.T, dialect string, opt ...TestOption) (*gorm.DB, strin
 	var err error
 
 	opts := getTestOpts(opt...)
+	ctx := context.Background()
 
 	switch opts.withTestDatabaseUrl {
 	case "":
-		cleanup, url, _, err = StartDbInDocker(dialect)
+		cleanup, url, err = getInitializedDb(ctx, dialect)
 		if err != nil {
 			t.Fatal(err)
 		}

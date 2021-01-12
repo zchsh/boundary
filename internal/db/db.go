@@ -9,7 +9,7 @@ import (
 	"github.com/lib/pq"
 )
 
-var StartDbInDocker = docker.GetInitializedDb
+var getInitializedDb = docker.GetInitializedDb
 
 type DbType int
 

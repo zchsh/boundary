@@ -443,17 +443,16 @@ func (b *Server) ConnectToDatabase(dialect string) error {
 	return nil
 }
 
-func (b *Server) CreateDevDatabase(dialect string, opt ...Option) error {
+func (b *Server) CreateDevDatabase(ctx context.Context, dialect string, opt ...Option) error {
 	opts := getOpts(opt...)
 
-	ctx := context.TODO()
 	var container, url string
 	var err error
 	var c func() error
 
 	switch b.DatabaseUrl {
 	case "":
-		c, url, container, err = docker.GetInitializedDb(dialect)
+		c, url, err = docker.GetInitializedDb(ctx, dialect)
 		// In case of an error, run the cleanup function.  If we pass all errors, c should be set to a noop
 		// function before returning from this method
 		defer func() {

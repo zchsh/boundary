@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"errors"
 	"sync"
 )
@@ -14,6 +15,6 @@ var (
 	mx = sync.Mutex{}
 )
 
-func startDbInDockerUnsupported(dialect string) (cleanup func() error, retURL, container string, err error) {
-	return nil, "", "", ErrDockerUnsupported
+func startDbInDockerUnsupported(context.Context, string) (cleanup func() error, retURL string, err error) {
+	return nil, "", ErrDockerUnsupported
 }

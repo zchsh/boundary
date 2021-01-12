@@ -42,9 +42,9 @@ func disconnectFromDatabase(dbName string, db *sql.DB) func() error {
 			return fmt.Errorf("Unable to terminate connection to db %q: %w", dbName, err)
 		}
 
-		// if _, err := db.Exec(fmt.Sprintf("drop database %s", dbName)); err != nil {
-		// 	return fmt.Errorf("Couldn't remove table: %w", err)
-		// }
+		if _, err := db.Exec(fmt.Sprintf("drop database %s", dbName)); err != nil {
+			return fmt.Errorf("Couldn't remove table: %w", err)
+		}
 		return nil
 	}
 }
@@ -106,7 +106,6 @@ func setupMainDb(ctx context.Context, dialect string) (u string, db *sql.DB, out
 			}
 			return
 		}
-		log.Fatal("Should have had the environment variable set!")
 
 		pool, err := dockertest.NewPool("")
 		if err != nil {
@@ -186,29 +185,26 @@ func setupMainDb(ctx context.Context, dialect string) (u string, db *sql.DB, out
 	return mainUrl, mainDb, outErr
 }
 
-func getInitializedDbSupported(dialect string) (cleanup func() error, retURL, container string, err error) {
-	ctx := context.TODO()
+func getInitializedDbSupported(ctx context.Context, dialect string) (c func() error, retURL string, err error) {
 	mURL, mDB, err := setupMainDb(ctx, dialect)
 	if err != nil {
-		return noopclean, "", "", err
+		return noopclean, "", err
 	}
 	u, dbName, err := createNewInitializedDatabaseFromMain(mURL, mDB)
 	if err != nil {
-		return noopclean, "", "", fmt.Errorf("Unable to create new db at %q: %w", mainUrl, err)
+		return noopclean, "", fmt.Errorf("Unable to create new db at %q: %w", mainUrl, err)
 	}
-	return disconnectFromDatabase(dbName, mainDb), u, "", nil
+	return disconnectFromDatabase(dbName, mainDb), u, nil
 }
 
-func startDbInDockerSupported(dialect string) (cleanup func() error, retURL, container string, err error) {
-	ctx := context.TODO()
+func startDbInDockerSupported(ctx context.Context, dialect string) (c func() error, retURL string, err error) {
 	mURL, mDB, err := setupMainDb(ctx, dialect)
 	if err != nil {
-		return noopclean, "", "", err
+		return noopclean, "", err
 	}
 	u, dbName, err := createNewFreshDatabaseFromMain(mURL, mDB)
 	if err != nil {
-		return noopclean, "", "", fmt.Errorf("Unable to create new db at %q: %w", mainUrl, err)
+		return noopclean, "", fmt.Errorf("Unable to create new db at %q: %w", mainUrl, err)
 	}
-	return noopclean, u, "", nil
-	return disconnectFromDatabase(dbName, mainDb), u, "", nil
+	return disconnectFromDatabase(dbName, mainDb), u, nil
 }

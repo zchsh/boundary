@@ -3,23 +3,45 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"log"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/hashicorp/boundary/internal/db/schema"
 	"github.com/ory/dockertest/v3"
 )
 
+var dockerInfoFile string
+
+func init() {
+	flag.StringVar(&dockerInfoFile, "docker_info_file", "", "specifies the file to append the container info to.")
+}
+
 func main() {
+	flag.Parse()
+	if dockerInfoFile == "" {
+		log.Fatalf("No docker info file defined.  Please use --docker_info_file to specify which file to use to output the docker info.")
+	}
+
+	f, err := os.OpenFile(dockerInfoFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0200)
+	if err != nil {
+		log.Fatalf("Failed to open the file %q for writing: %v", dockerInfoFile, err)
+	}
+
 	pool, err := dockertest.NewPool("")
 	if err != nil {
-		log.Fatal("Couldn't create pool %v", err)
+		log.Fatalf("Couldn't create pool %v", err)
 	}
 	resource, err := pool.Run("postgres", "12", []string{"POSTGRES_PASSWORD=password"})
 	if err != nil {
-		log.Fatal("Couldn't docker run %v", err)
+		log.Fatalf("Couldn't docker run %v", err)
+	}
+
+	if _, err := f.WriteString(resource.Container.Name); err != nil {
+		log.Fatalf("Failed writing to %q: %v", dockerInfoFile, err)
 	}
 
 	dialect := "postgres"
@@ -34,7 +56,7 @@ func main() {
 
 	ctx, _ = context.WithTimeout(ctx, 2*time.Minute)
 	if err := db.PingContext(ctx); err != nil {
-		log.Fatalf("Unable to ping db: %w", err)
+		log.Fatalf("Unable to ping db: %v", err)
 		return
 	}
 	if _, err := db.Exec("CREATE DATABASE boundary WITH is_template true"); err != nil {
@@ -78,7 +100,7 @@ func main() {
 	if _, err := db.Exec("SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity  WHERE pg_stat_activity.datname = 'boundary' AND pid <> pg_backend_pid()"); err != nil {
 		log.Fatalf("Unable to terminate backends: %v", err)
 	}
-	fmt.Printf("%s=%s", schema.TestingDbEnvKey, u)
+	fmt.Print(u)
 	// if err := os.Setenv(schema.TestingDbEnvKey, u); err != nil {
 	// 	log.Fatalf("Couldn't set the env variable: %v", err)
 	// }

@@ -13,17 +13,12 @@ import (
 
 func TestState(t *testing.T) {
 	dialect := "postgres"
-	c, u, _, err := docker.StartDbInDocker(dialect)
-	t.Cleanup(func() {
-		if err := c(); err != nil {
-			t.Fatalf("Got error at cleanup: %v", err)
-		}
-	})
+	ctx := context.Background()
+	c, u, err := docker.StartDbInDocker(ctx, dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
 	})
-	ctx := context.Background()
 	d, err := sql.Open(dialect, u)
 	require.NoError(t, err)
 

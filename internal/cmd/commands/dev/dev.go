@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"runtime"
@@ -233,7 +234,6 @@ func (c *Command) AutocompleteFlags() complete.Flags {
 
 func (c *Command) Run(args []string) int {
 	c.CombineLogs = c.flagCombineLogs
-
 	var err error
 
 	f := c.Flags()
@@ -243,6 +243,10 @@ func (c *Command) Run(args []string) int {
 		return 1
 	}
 
+	ctx := c.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// childShutdownCh := make(chan struct{})
 
 	c.Config, err = config.DevCombined()
@@ -399,7 +403,7 @@ func (c *Command) Run(args []string) int {
 		if c.flagDisableDatabaseDestruction {
 			opts = append(opts, base.WithSkipDatabaseDestruction())
 		}
-		if err := c.CreateDevDatabase("postgres", opts...); err != nil {
+		if err := c.CreateDevDatabase(ctx, "postgres", opts...); err != nil {
 			if err == docker.ErrDockerUnsupported {
 				c.UI.Error("Automatically starting a Docker container running Postgres is not currently supported on this platform. Please use -database-url to pass in a URL (or an env var or file reference to a URL) for connecting to an existing empty database.")
 				return 1
@@ -417,7 +421,7 @@ func (c *Command) Run(args []string) int {
 			return 1
 		}
 		c.DatabaseUrl = strings.TrimSpace(dbaseUrl)
-		if err := c.CreateDevDatabase("postgres"); err != nil {
+		if err := c.CreateDevDatabase(ctx, "postgres"); err != nil {
 			c.UI.Error(fmt.Errorf("Error connecting to database: %w", err).Error())
 			return 1
 		}

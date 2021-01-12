@@ -13,33 +13,9 @@ import (
 )
 
 func TestNewManager(t *testing.T) {
-	c, u, _, err := docker.StartDbInDocker("postgres")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, c())
-	})
-	d, err := sql.Open("postgres", u)
-	require.NoError(t, err)
-
 	ctx := context.Background()
-	_, err = NewManager(ctx, "postgres", d)
-	require.NoError(t, err)
-	_, err = NewManager(ctx, "unknown", d)
-	assert.True(t, errors.Match(errors.T(errors.InvalidParameter), err))
-
-	d.Close()
-	_, err = NewManager(ctx, "postgres", d)
-	assert.True(t, errors.Match(errors.T(errors.Op("schema.NewManager")), err))
-}
-
-func TestSetup(t *testing.T) {
-	_, _, _, err := docker.StartDbInDocker("postgres")
-	require.NoError(t, err)
-}
-
-func TestRollForward(t *testing.T) {
 	dialect := "postgres"
-	c, u, _, err := docker.StartDbInDocker(dialect)
+	c, u, err := docker.StartDbInDocker(ctx, dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
@@ -47,7 +23,32 @@ func TestRollForward(t *testing.T) {
 	d, err := sql.Open(dialect, u)
 	require.NoError(t, err)
 
+	_, err = NewManager(ctx, dialect, d)
+	require.NoError(t, err)
+	_, err = NewManager(ctx, "unknown", d)
+	assert.True(t, errors.Match(errors.T(errors.InvalidParameter), err))
+
+	d.Close()
+	_, err = NewManager(ctx, dialect, d)
+	assert.True(t, errors.Match(errors.T(errors.Op("schema.NewManager")), err))
+}
+
+func TestSetup(t *testing.T) {
+	_, _, err := docker.StartDbInDocker(context.Background(), "postgres")
+	require.NoError(t, err)
+}
+
+func TestRollForward(t *testing.T) {
+	dialect := "postgres"
 	ctx := context.Background()
+	c, u, err := docker.StartDbInDocker(ctx, dialect)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, c())
+	})
+	d, err := sql.Open(dialect, u)
+	require.NoError(t, err)
+
 	m, err := NewManager(ctx, dialect, d)
 	require.NoError(t, err)
 	assert.NoError(t, m.RollForward(ctx))
@@ -80,7 +81,8 @@ func TestRollForward_NotFromFresh(t *testing.T) {
 	}
 	migrationStates[dialect] = nState
 
-	c, u, _, err := docker.StartDbInDocker(dialect)
+	ctx := context.Background()
+	c, u, err := docker.StartDbInDocker(ctx, dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
@@ -89,7 +91,6 @@ func TestRollForward_NotFromFresh(t *testing.T) {
 	require.NoError(t, err)
 
 	// Initialize the DB with only a portion of the current sql scripts.
-	ctx := context.Background()
 	m, err := NewManager(ctx, dialect, d)
 	require.NoError(t, err)
 	assert.NoError(t, m.RollForward(ctx))
@@ -113,12 +114,12 @@ func TestRollForward_NotFromFresh(t *testing.T) {
 
 func TestManager_ExclusiveLock(t *testing.T) {
 	dialect := "postgres"
-	c, u, _, err := docker.StartDbInDocker(dialect)
+	ctx := context.Background()
+	c, u, err := docker.StartDbInDocker(ctx, dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
 	})
-	ctx := context.TODO()
 	d1, err := sql.Open(dialect, u)
 	require.NoError(t, err)
 	m1, err := NewManager(ctx, dialect, d1)
@@ -137,12 +138,12 @@ func TestManager_ExclusiveLock(t *testing.T) {
 
 func TestManager_SharedLock(t *testing.T) {
 	dialect := "postgres"
-	c, u, _, err := docker.StartDbInDocker(dialect)
+	ctx := context.Background()
+	c, u, err := docker.StartDbInDocker(ctx, dialect)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c())
 	})
-	ctx := context.TODO()
 	d1, err := sql.Open(dialect, u)
 	require.NoError(t, err)
 	m1, err := NewManager(ctx, dialect, d1)

@@ -1,11 +1,13 @@
 package db
 
 import (
+	"context"
 	"testing"
 )
 
 func TestOpen(t *testing.T) {
-	cleanup, url, _, err := StartDbInDocker("postgres")
+	ctx := context.Background()
+	cleanup, url, err := getInitializedDb(ctx, "postgres")
 	if err != nil {
 		t.Fatal(err)
 	}
