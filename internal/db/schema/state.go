@@ -6,6 +6,7 @@ import (
 
 const nilVersion = -1
 
+// migrationState is an interface that
 type migrationState struct {
 	// devMigration is true if the database schema that would be applied by
 	// InitStore would be from files in the /dev directory which indicates it would
@@ -30,12 +31,12 @@ type State struct {
 	BinarySchemaVersion   int
 }
 
-// State provides the state of the boundary schema contained in the backing database.
-func (b *Manager) State(ctx context.Context) (*State, error) {
+// CurrentState provides the state of the boundary schema contained in the backing database.
+func (b *Manager) CurrentState(ctx context.Context) (*State, error) {
 	dbS := State{
 		BinarySchemaVersion: BinarySchemaVersion(b.dialect),
 	}
-	v, dirty, err := b.driver.version(ctx)
+	v, dirty, err := b.driver.Version(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -48,10 +49,20 @@ func (b *Manager) State(ctx context.Context) (*State, error) {
 	return &dbS, nil
 }
 
+func getUpMigration(dialect string) map[int][]byte {
+	return migrationStates[dialect].upMigrations
+}
+
+func getDownMigration(dialect string) map[int][]byte {
+	return migrationStates[dialect].downMigrations
+}
+
+// DevMigration returns true if the provided dialect has changes which are still in development.
 func DevMigration(dialect string) bool {
 	return migrationStates[dialect].devMigration
 }
 
+// BinarySchemaVersion provides the schema version that this binary supports for the provided dialect.
 func BinarySchemaVersion(dialect string) int {
 	return migrationStates[dialect].binarySchemaVersion
 }

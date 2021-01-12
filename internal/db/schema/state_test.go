@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/hashicorp/boundary/internal/db/schema/postgres"
 	"github.com/hashicorp/boundary/internal/docker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,13 +32,13 @@ func TestState(t *testing.T) {
 	want := &State{
 		BinarySchemaVersion: BinarySchemaVersion(dialect),
 	}
-	s, err := m.State(ctx)
+	s, err := m.CurrentState(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, want, s)
 
-	testDriver, err := newPostgres(ctx, d)
+	testDriver, err := postgres.NewPostgres(ctx, d)
 	require.NoError(t, err)
-	require.NoError(t, testDriver.setVersion(ctx, 2, true))
+	require.NoError(t, testDriver.SetVersion(ctx, 2, true))
 
 	want = &State{
 		InitializationStarted: true,
@@ -45,7 +46,7 @@ func TestState(t *testing.T) {
 		Dirty:                 true,
 		CurrentSchemaVersion:  2,
 	}
-	s, err = m.State(ctx)
+	s, err = m.CurrentState(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, want, s)
 }

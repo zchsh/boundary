@@ -5,10 +5,32 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/hashicorp/boundary/internal/db/schema/postgres"
 	"github.com/hashicorp/boundary/internal/docker"
+	"github.com/hashicorp/boundary/internal/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewManager(t *testing.T) {
+	c, u, _, err := docker.StartDbInDocker("postgres")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, c())
+	})
+	d, err := sql.Open("postgres", u)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, err = NewManager(ctx, "postgres", d)
+	require.NoError(t, err)
+	_, err = NewManager(ctx, "unknown", d)
+	assert.True(t, errors.Match(errors.T(errors.InvalidParameter), err))
+
+	d.Close()
+	_, err = NewManager(ctx, "postgres", d)
+	assert.True(t, errors.Match(errors.T(errors.Op("schema.NewManager")), err))
+}
 
 func TestSetup(t *testing.T) {
 	_, _, _, err := docker.StartDbInDocker("postgres")
@@ -31,9 +53,9 @@ func TestRollForward(t *testing.T) {
 	assert.NoError(t, m.RollForward(ctx))
 
 	// Now set to dirty at an early version
-	testDriver, err := newPostgres(ctx, d)
+	testDriver, err := postgres.NewPostgres(ctx, d)
 	require.NoError(t, err)
-	testDriver.setVersion(ctx, 0, true)
+	testDriver.SetVersion(ctx, 0, true)
 	assert.Error(t, m.RollForward(ctx))
 }
 
@@ -72,7 +94,7 @@ func TestRollForward_NotFromFresh(t *testing.T) {
 	require.NoError(t, err)
 	assert.NoError(t, m.RollForward(ctx))
 
-	ver, dirty, err := m.driver.version(ctx)
+	ver, dirty, err := m.driver.Version(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, nState.binarySchemaVersion, ver)
 	assert.False(t, dirty)
@@ -83,7 +105,7 @@ func TestRollForward_NotFromFresh(t *testing.T) {
 	newM, err := NewManager(ctx, dialect, d)
 	require.NoError(t, err)
 	assert.NoError(t, newM.RollForward(ctx))
-	ver, dirty, err = newM.driver.version(ctx)
+	ver, dirty, err = newM.driver.Version(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, oState.binarySchemaVersion, ver)
 	assert.False(t, dirty)
@@ -107,9 +129,10 @@ func TestManager_ExclusiveLock(t *testing.T) {
 	m2, err := NewManager(ctx, dialect, d2)
 	require.NoError(t, err)
 
-	assert.NoError(t, m1.ExclusiveLock(ctx, 123))
-	assert.Error(t, m2.ExclusiveLock(ctx, 123))
-	assert.Error(t, m2.SharedLock(ctx, 123))
+	assert.NoError(t, m1.ExclusiveLock(ctx))
+	assert.NoError(t, m1.ExclusiveLock(ctx))
+	assert.Error(t, m2.ExclusiveLock(ctx))
+	assert.Error(t, m2.SharedLock(ctx))
 }
 
 func TestManager_SharedLock(t *testing.T) {
@@ -130,11 +153,11 @@ func TestManager_SharedLock(t *testing.T) {
 	m2, err := NewManager(ctx, dialect, d2)
 	require.NoError(t, err)
 
-	assert.NoError(t, m1.SharedLock(ctx, 123))
-	assert.NoError(t, m2.SharedLock(ctx, 123))
-	assert.NoError(t, m1.SharedLock(ctx, 123))
-	assert.NoError(t, m2.SharedLock(ctx, 123))
+	assert.NoError(t, m1.SharedLock(ctx))
+	assert.NoError(t, m2.SharedLock(ctx))
+	assert.NoError(t, m1.SharedLock(ctx))
+	assert.NoError(t, m2.SharedLock(ctx))
 
-	assert.Error(t, m1.ExclusiveLock(ctx, 123))
-	assert.Error(t, m2.ExclusiveLock(ctx, 123))
+	assert.Error(t, m1.ExclusiveLock(ctx))
+	assert.Error(t, m2.ExclusiveLock(ctx))
 }
