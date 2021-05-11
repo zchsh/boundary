@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/boundary/internal/auth/password"
 	"github.com/hashicorp/boundary/internal/db"
 	"github.com/hashicorp/boundary/internal/db/timestamp"
 	"github.com/hashicorp/boundary/internal/iam"
@@ -24,7 +25,9 @@ func TestAuthToken_ImmutableFields(t *testing.T) {
 	kms := kms.TestKms(t, conn, wrapper)
 	repo := iam.TestRepo(t, conn, wrapper)
 	org, _ := iam.TestScopes(t, repo)
-	new := TestAuthToken(t, conn, kms, org.PublicId)
+	am := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	acct := password.TestAccount(t, conn, am.GetPublicId(), "name1")
+	new := TestAuthToken(t, conn, kms, org.PublicId, acct.GetPublicId())
 
 	tests := []struct {
 		name      string

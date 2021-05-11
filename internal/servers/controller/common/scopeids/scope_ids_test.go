@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/boundary/internal/auth"
+	"github.com/hashicorp/boundary/internal/auth/password"
 	"github.com/hashicorp/boundary/internal/authtoken"
 	"github.com/hashicorp/boundary/internal/db"
 	pbs "github.com/hashicorp/boundary/internal/gen/controller/api/services"
@@ -223,7 +224,9 @@ func TestListingScopeIds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			require := require.New(t)
 			o, p := iam.TestScopes(t, iamRepo)
-			at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+			orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+			orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+			at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct.GetPublicId())
 			ctx := auth.NewVerifierContext(context.Background(),
 				nil,
 				iamRepoFn,

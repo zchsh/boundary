@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/hashicorp/boundary/internal/auth"
+	"github.com/hashicorp/boundary/internal/auth/password"
 	"github.com/hashicorp/boundary/internal/authtoken"
 	"github.com/hashicorp/boundary/internal/db"
 	"github.com/hashicorp/boundary/internal/gen/controller/api/resources/scopes"
@@ -52,7 +53,9 @@ func TestGetSession(t *testing.T) {
 	}
 
 	o, p := iam.TestScopes(t, iamRepo)
-	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct.GetPublicId())
 	uId := at.GetIamUserId()
 	hc := static.TestCatalogs(t, conn, p.GetPublicId(), 1)[0]
 	hs := static.TestSets(t, conn, hc.GetPublicId(), 1)[0]
@@ -168,9 +171,12 @@ func TestList_Self(t *testing.T) {
 
 	o, pWithSessions := iam.TestScopes(t, iamRepo)
 
-	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct.GetPublicId())
 	uId := at.GetIamUserId()
-	otherAt := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	otherAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name2")
+	otherAt := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), otherAcct.GetPublicId())
 
 	hc := static.TestCatalogs(t, conn, pWithSessions.GetPublicId(), 1)[0]
 	hs := static.TestSets(t, conn, hc.GetPublicId(), 1)[0]
@@ -250,10 +256,14 @@ func TestList(t *testing.T) {
 	o, pWithSessions := iam.TestScopes(t, iamRepo)
 	oOther, pWithOtherSessions := iam.TestScopes(t, iamRepo)
 
-	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct.GetPublicId())
 	uId := at.GetIamUserId()
 
-	atOther := authtoken.TestAuthToken(t, conn, kms, oOther.GetPublicId())
+	otherAm := password.TestAuthMethods(t, conn, oOther.GetPublicId(), 1)[0]
+	otherAcct := password.TestAccount(t, conn, otherAm.GetPublicId(), "name1")
+	atOther := authtoken.TestAuthToken(t, conn, kms, oOther.GetPublicId(), otherAcct.GetPublicId())
 	uIdOther := atOther.GetIamUserId()
 
 	hc := static.TestCatalogs(t, conn, pWithSessions.GetPublicId(), 1)[0]
@@ -465,7 +475,9 @@ func TestCancel(t *testing.T) {
 	}
 
 	o, p := iam.TestScopes(t, iamRepo)
-	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct.GetPublicId())
 	uId := at.GetIamUserId()
 	hc := static.TestCatalogs(t, conn, p.GetPublicId(), 1)[0]
 	hs := static.TestSets(t, conn, hc.GetPublicId(), 1)[0]

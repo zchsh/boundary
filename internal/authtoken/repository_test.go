@@ -299,7 +299,9 @@ func TestRepository_LookupAuthToken(t *testing.T) {
 	kms := kms.TestKms(t, conn, wrapper)
 	repo := iam.TestRepo(t, conn, wrapper)
 	org, _ := iam.TestScopes(t, repo)
-	at := TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 	at.Token = ""
 	at.CtToken = nil
 	at.KeyId = ""
@@ -385,7 +387,9 @@ func TestRepository_ValidateToken(t *testing.T) {
 	require.NotNil(t, repo)
 
 	org, _ := iam.TestScopes(t, iamRepo)
-	at := TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 	atToken := at.GetToken()
 	at.Token = ""
 	at.CtToken = nil
@@ -501,7 +505,9 @@ func TestRepository_ValidateToken_expired(t *testing.T) {
 	iamRepo := iam.TestRepo(t, conn, wrapper)
 
 	org, _ := iam.TestScopes(t, iamRepo)
-	baseAT := TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	baseAT := TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 	baseAT.GetAuthAccountId()
 	aAcct := allocAuthAccount()
 	aAcct.PublicId = baseAT.GetAuthAccountId()
@@ -573,7 +579,9 @@ func TestRepository_DeleteAuthToken(t *testing.T) {
 	kms := kms.TestKms(t, conn, wrapper)
 	repo := iam.TestRepo(t, conn, wrapper)
 	org, _ := iam.TestScopes(t, repo)
-	at := TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 	badId, err := NewAuthTokenId()
 	require.NoError(t, err)
 	require.NotNil(t, badId)
@@ -635,13 +643,18 @@ func TestRepository_ListAuthTokens(t *testing.T) {
 	kms := kms.TestKms(t, conn, wrapper)
 	repo := iam.TestRepo(t, conn, wrapper)
 	org, _ := iam.TestScopes(t, repo)
-	at1 := TestAuthToken(t, conn, kms, org.GetPublicId())
+
+	orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at1 := TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 	at1.Token = ""
 	at1.KeyId = ""
-	at2 := TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAcct = password.TestAccount(t, conn, orgAm.GetPublicId(), "name2")
+	at2 := TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 	at2.Token = ""
 	at2.KeyId = ""
-	at3 := TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAcct = password.TestAccount(t, conn, orgAm.GetPublicId(), "name3")
+	at3 := TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 	at3.Token = ""
 	at3.KeyId = ""
 
@@ -699,9 +712,14 @@ func TestRepository_ListAuthTokens_Multiple_Scopes(t *testing.T) {
 	const numPerScope = 10
 	var total int
 	for i := 0; i < numPerScope; i++ {
-		TestAuthToken(t, conn, kms, "global")
+		globalAm := password.TestAuthMethods(t, conn, "global", 1)[0]
+		globalAcct := password.TestAccount(t, conn, globalAm.GetPublicId(), "name1")
+		TestAuthToken(t, conn, kms, "global", globalAcct.GetPublicId())
 		total++
-		TestAuthToken(t, conn, kms, org.GetPublicId())
+
+		orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+		orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+		TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 		total++
 	}
 
@@ -738,7 +756,9 @@ func Test_IssuePendingToken(t *testing.T) {
 			tokenRequestId: func() string {
 				tokenPublicId, err := NewAuthTokenId()
 				require.NoError(t, err)
-				tk := TestAuthToken(t, conn, kmsCache, org.PublicId, WithPublicId(tokenPublicId))
+				am := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+				acct := password.TestAccount(t, conn, am.GetPublicId(), "name1")
+				tk := TestAuthToken(t, conn, kmsCache, org.PublicId, acct.GetPublicId(), WithPublicId(tokenPublicId))
 				return tk.PublicId
 			}(),
 			wantErrMatch:    errors.T(errors.RecordNotFound),
@@ -749,7 +769,9 @@ func Test_IssuePendingToken(t *testing.T) {
 			tokenRequestId: func() string {
 				tokenPublicId, err := NewAuthTokenId()
 				require.NoError(t, err)
-				tk := TestAuthToken(t, conn, kmsCache, org.PublicId, WithStatus(PendingStatus), WithPublicId(tokenPublicId))
+				am := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+				acct := password.TestAccount(t, conn, am.GetPublicId(), "name1")
+				tk := TestAuthToken(t, conn, kmsCache, org.PublicId, acct.GetPublicId(), WithStatus(PendingStatus), WithPublicId(tokenPublicId))
 				return tk.PublicId
 			}(),
 		},

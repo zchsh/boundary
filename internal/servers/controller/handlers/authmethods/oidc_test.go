@@ -202,7 +202,9 @@ func TestList_FilterNonPublic(t *testing.T) {
 		{
 			name: "authenticated",
 			reqCtx: func() context.Context {
-				at := authtoken.TestAuthToken(t, conn, kmsCache, o.GetPublicId())
+				orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+				orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+				at := authtoken.TestAuthToken(t, conn, kmsCache, o.GetPublicId(), orgAcct.GetPublicId())
 				return auth.NewVerifierContext(requests.NewRequestContext(context.Background()),
 					nil,
 					iamRepoFn,

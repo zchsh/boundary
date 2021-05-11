@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/boundary/internal/auth/oidc/store"
+	"github.com/hashicorp/boundary/internal/authtoken"
 	"github.com/hashicorp/boundary/internal/db"
 	"github.com/hashicorp/boundary/internal/errors"
 	"github.com/hashicorp/boundary/internal/iam"
@@ -703,6 +704,78 @@ func Test_convertValueObjects(t *testing.T) {
 			assert.Equal(tt.wantValues, values)
 		})
 	}
+}
+
+func TestOidcAuthToken_DbUpdate(t *testing.T) {
+	ctx := context.Background()
+	conn, _ := db.TestSetup(t, "postgres")
+	wrapper := db.TestWrapper(t)
+	kmsCache := kms.TestKms(t, conn, wrapper)
+	org, _ := iam.TestScopes(t, iam.TestRepo(t, conn, wrapper))
+	rw := db.New(conn)
+
+	databaseWrapper, err := kmsCache.GetWrapper(context.Background(), org.PublicId, kms.KeyPurposeDatabase)
+	require.NoError(t, err)
+
+	t.Run("update issuer deletes auth token", func(t *testing.T) {
+		unrelatedAm := TestAuthMethod(t, conn, databaseWrapper, org.PublicId, InactiveState,
+			"issuertestclientid",
+			"my-dogs-name",
+			WithIssuer(TestConvertToUrls(t, "https://unrelatedissuer.com")[0]),
+			WithApiUrl(TestConvertToUrls(t, "https://api.com")[0]))
+		unrelatedAcct := TestAccount(t, conn, unrelatedAm, "subject")
+		unrelatedAt := authtoken.TestAuthToken(t, conn, kmsCache, org.GetPublicId(), unrelatedAcct.GetPublicId())
+		require.NoError(t, rw.LookupByPublicId(ctx, unrelatedAt))
+
+		am := TestAuthMethod(t, conn, databaseWrapper, org.PublicId, InactiveState,
+			"alice_rp",
+			"my-dogs-name",
+			WithIssuer(TestConvertToUrls(t, "https://alice.com")[0]),
+			WithApiUrl(TestConvertToUrls(t, "https://api.com")[0]))
+		acct := TestAccount(t, conn, am, "subject")
+		at := authtoken.TestAuthToken(t, conn, kmsCache, org.GetPublicId(), acct.GetPublicId())
+		require.NotNil(t, at)
+		require.NoError(t, rw.LookupByPublicId(ctx, at))
+
+		am.Issuer = "https://bob.com"
+		rc, err := rw.Update(ctx, am, []string{"Issuer"}, []string{})
+		require.NoError(t, err)
+		require.Equal(t, 1, rc)
+		require.NoError(t, err)
+		err = rw.LookupByPublicId(ctx, at)
+		assert.Truef(t, errors.Match(errors.T(errors.RecordNotFound), err), "got %v, wanted record not found", err)
+
+		require.NoError(t, rw.LookupByPublicId(ctx, unrelatedAt))
+	})
+	t.Run("update client_id deletes auth token", func(t *testing.T) {
+		unrelatedAm := TestAuthMethod(t, conn, databaseWrapper, org.PublicId, InactiveState,
+			"unrelatedClientId",
+			"my-dogs-name",
+			WithIssuer(TestConvertToUrls(t, "https://clientidtestissuer.com")[0]),
+			WithApiUrl(TestConvertToUrls(t, "https://api.com")[0]))
+		unrelatedAcct := TestAccount(t, conn, unrelatedAm, "subject")
+		unrelatedAt := authtoken.TestAuthToken(t, conn, kmsCache, org.GetPublicId(), unrelatedAcct.GetPublicId())
+		require.NoError(t, rw.LookupByPublicId(ctx, unrelatedAt))
+
+		am := TestAuthMethod(t, conn, databaseWrapper, org.PublicId, InactiveState,
+			"alice_rp",
+			"my-dogs-name",
+			WithIssuer(TestConvertToUrls(t, "https://alice.com")[0]),
+			WithApiUrl(TestConvertToUrls(t, "https://api.com")[0]))
+		acct := TestAccount(t, conn, am, "subject")
+		at := authtoken.TestAuthToken(t, conn, kmsCache, org.GetPublicId(), acct.GetPublicId())
+		require.NotNil(t, at)
+		require.NoError(t, rw.LookupByPublicId(ctx, at))
+
+		am.ClientId = "newclientid"
+		rc, err := rw.Update(ctx, am, []string{"ClientId"}, []string{})
+		require.NoError(t, err)
+		require.Equal(t, 1, rc)
+		require.NoError(t, err)
+		err = rw.LookupByPublicId(ctx, at)
+		assert.Truef(t, errors.Match(errors.T(errors.RecordNotFound), err), "got %v, wanted record not found", err)
+		require.NoError(t, rw.LookupByPublicId(ctx, unrelatedAt))
+	})
 }
 
 type converted []interface{}

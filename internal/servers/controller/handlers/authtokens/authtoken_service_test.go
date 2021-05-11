@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/hashicorp/boundary/internal/auth"
+	"github.com/hashicorp/boundary/internal/auth/password"
 	"github.com/hashicorp/boundary/internal/authtoken"
 	"github.com/hashicorp/boundary/internal/db"
 	pb "github.com/hashicorp/boundary/internal/gen/controller/api/resources/authtokens"
@@ -52,8 +53,11 @@ func TestGetSelf(t *testing.T) {
 	require.NoError(t, err, "Couldn't create new auth token service.")
 
 	o, _ := iam.TestScopes(t, iam.TestRepo(t, conn, wrap))
-	at1 := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
-	at2 := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at1 := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct.GetPublicId())
+	orgAcct2 := password.TestAccount(t, conn, orgAm.GetPublicId(), "name2")
+	at2 := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct2.GetPublicId())
 
 	cases := []struct {
 		name   string
@@ -130,7 +134,9 @@ func TestGet(t *testing.T) {
 	require.NoError(t, err, "Couldn't create new auth token service.")
 
 	org, _ := iam.TestScopes(t, iam.TestRepo(t, conn, wrap))
-	at := authtoken.TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := authtoken.TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 
 	wireAuthToken := pb.AuthToken{
 		Id:                      at.GetPublicId(),
@@ -212,9 +218,12 @@ func TestList_Self(t *testing.T) {
 	// includes list on auth tokens
 	o, _ := iam.TestScopes(t, iamRepo)
 
+	orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
 	// Each of these should only end up being able to list themselves
-	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
-	otherAt := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct.GetPublicId())
+	orgAcct2 := password.TestAccount(t, conn, orgAm.GetPublicId(), "name2")
+	otherAt := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct2.GetPublicId())
 
 	cases := []struct {
 		name      string
@@ -275,7 +284,9 @@ func TestList(t *testing.T) {
 
 	var globalTokens []*pb.AuthToken
 	for i := 0; i < 3; i++ {
-		at := authtoken.TestAuthToken(t, conn, kms, scope.Global.String())
+		globalAm := password.TestAuthMethods(t, conn, scope.Global.String(), 1)[0]
+		globalAcct := password.TestAccount(t, conn, globalAm.GetPublicId(), "testlist")
+		at := authtoken.TestAuthToken(t, conn, kms, scope.Global.String(), globalAcct.GetPublicId())
 		globalTokens = append(globalTokens, &pb.AuthToken{
 			Id:                      at.GetPublicId(),
 			ScopeId:                 at.GetScopeId(),
@@ -294,7 +305,9 @@ func TestList(t *testing.T) {
 	orgWithSomeTokens, _ := iam.TestScopes(t, iamRepo)
 	var wantSomeTokens []*pb.AuthToken
 	for i := 0; i < 3; i++ {
-		at := authtoken.TestAuthToken(t, conn, kms, orgWithSomeTokens.GetPublicId())
+		orgAm := password.TestAuthMethods(t, conn, orgWithSomeTokens.GetPublicId(), 1)[0]
+		orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+		at := authtoken.TestAuthToken(t, conn, kms, orgWithSomeTokens.GetPublicId(), orgAcct.GetPublicId())
 		wantSomeTokens = append(wantSomeTokens, &pb.AuthToken{
 			Id:                      at.GetPublicId(),
 			ScopeId:                 at.GetScopeId(),
@@ -310,10 +323,13 @@ func TestList(t *testing.T) {
 		})
 	}
 
+
 	orgWithOtherTokens, _ := iam.TestScopes(t, iamRepo)
 	var wantOtherTokens []*pb.AuthToken
 	for i := 0; i < 3; i++ {
-		at := authtoken.TestAuthToken(t, conn, kms, orgWithOtherTokens.GetPublicId())
+		orgAm := password.TestAuthMethods(t, conn, orgWithOtherTokens.GetPublicId(), 1)[0]
+		orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+		at := authtoken.TestAuthToken(t, conn, kms, orgWithOtherTokens.GetPublicId(), orgAcct.GetPublicId())
 		wantOtherTokens = append(wantOtherTokens, &pb.AuthToken{
 			Id:                      at.GetPublicId(),
 			ScopeId:                 at.GetScopeId(),
@@ -437,8 +453,11 @@ func TestDeleteSelf(t *testing.T) {
 	require.NoError(t, err, "Couldn't create new auth token service.")
 
 	o, _ := iam.TestScopes(t, iam.TestRepo(t, conn, wrap))
-	at1 := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
-	at2 := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at1 := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct.GetPublicId())
+	orgAcct2 := password.TestAccount(t, conn, orgAm.GetPublicId(), "name2")
+	at2 := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), orgAcct2.GetPublicId())
 
 	cases := []struct {
 		name     string
@@ -520,7 +539,9 @@ func TestDelete(t *testing.T) {
 	iamRepo := iam.TestRepo(t, conn, wrap)
 
 	org, _ := iam.TestScopes(t, iamRepo)
-	at := authtoken.TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := authtoken.TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 
 	s, err := authtokens.NewService(repoFn, iamRepoFn)
 	require.NoError(t, err, "Error when getting new user service.")
@@ -584,7 +605,9 @@ func TestDelete_twice(t *testing.T) {
 	iamRepo := iam.TestRepo(t, conn, wrap)
 
 	org, _ := iam.TestScopes(t, iamRepo)
-	at := authtoken.TestAuthToken(t, conn, kms, org.GetPublicId())
+	orgAm := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	orgAcct := password.TestAccount(t, conn, orgAm.GetPublicId(), "name1")
+	at := authtoken.TestAuthToken(t, conn, kms, org.GetPublicId(), orgAcct.GetPublicId())
 
 	s, err := authtokens.NewService(repoFn, iamRepoFn)
 	require.NoError(err, "Error when getting new user service")

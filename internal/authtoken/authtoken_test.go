@@ -2,6 +2,7 @@ package authtoken
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -27,10 +28,6 @@ func TestAuthToken_DbUpdate(t *testing.T) {
 	kms := kms.TestKms(t, conn, wrapper)
 	iamRepo := iam.TestRepo(t, conn, wrapper)
 
-	org, _ := iam.TestScopes(t, iamRepo)
-	am := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
-	acct := password.TestAccount(t, conn, am.GetPublicId(), "name1")
-
 	newAuthTokId, err := NewAuthTokenId()
 	require.NoError(t, err)
 
@@ -53,7 +50,7 @@ func TestAuthToken_DbUpdate(t *testing.T) {
 			name: "immutable-authacctid",
 			args: args{
 				fieldMask: []string{"AuthAccountId"},
-				authTok:   &store.AuthToken{AuthAccountId: acct.GetPublicId()},
+				authTok:   &store.AuthToken{AuthAccountId: fmt.Sprintf("%s_1234567890", password.AccountPrefix)},
 			},
 			wantErr: true,
 		},
@@ -106,7 +103,9 @@ func TestAuthToken_DbUpdate(t *testing.T) {
 			w := db.New(conn)
 
 			org, _ := iam.TestScopes(t, iamRepo)
-			authTok := TestAuthToken(t, conn, kms, org.GetPublicId())
+			am := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+			acct := password.TestAccount(t, conn, am.GetPublicId(), "name1")
+			authTok := TestAuthToken(t, conn, kms, org.GetPublicId(), acct.GetPublicId())
 			proto.Merge(authTok.AuthToken, tt.args.authTok)
 
 			err := authTok.encrypt(context.Background(), wrapper)
@@ -130,7 +129,7 @@ func TestAuthToken_DbCreate(t *testing.T) {
 	org, _ := iam.TestScopes(t, iam.TestRepo(t, conn, wrapper))
 	am := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
 	acct := password.TestAccount(t, conn, am.GetPublicId(), "name1")
-	createdAuthToken := TestAuthToken(t, conn, kms, org.GetPublicId())
+	createdAuthToken := TestAuthToken(t, conn, kms, org.GetPublicId(), acct.GetPublicId())
 
 	testAuthTokenId := func() string {
 		id, err := NewAuthTokenId()
@@ -190,7 +189,9 @@ func TestAuthToken_DbDelete(t *testing.T) {
 	wrapper := db.TestWrapper(t)
 	kms := kms.TestKms(t, conn, wrapper)
 	org, _ := iam.TestScopes(t, iam.TestRepo(t, conn, wrapper))
-	existingAuthTok := TestAuthToken(t, conn, kms, org.GetPublicId())
+	am := password.TestAuthMethods(t, conn, org.GetPublicId(), 1)[0]
+	acct := password.TestAccount(t, conn, am.GetPublicId(), "name1")
+	existingAuthTok := TestAuthToken(t, conn, kms, org.GetPublicId(), acct.GetPublicId())
 
 	tests := []struct {
 		name      string

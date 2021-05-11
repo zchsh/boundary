@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hashicorp/boundary/internal/auth/password"
 	"github.com/hashicorp/boundary/internal/authtoken"
 	"github.com/hashicorp/boundary/internal/db"
 	"github.com/hashicorp/boundary/internal/iam"
@@ -38,7 +39,9 @@ func TestAuthTokenAuthenticator(t *testing.T) {
 	}
 
 	o, _ := iam.TestScopes(t, iamRepo)
-	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId())
+	am := password.TestAuthMethods(t, conn, o.GetPublicId(), 1)[0]
+	acct := password.TestAccount(t, conn, am.GetPublicId(), "name1")
+	at := authtoken.TestAuthToken(t, conn, kms, o.GetPublicId(), acct.GetPublicId())
 	encToken, err := authtoken.EncryptToken(context.Background(), kms, o.GetPublicId(), at.GetPublicId(), at.GetToken())
 	require.NoError(t, err)
 
