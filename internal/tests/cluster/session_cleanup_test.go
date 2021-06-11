@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/hashicorp/boundary/internal/proxy"
 	"github.com/hashicorp/boundary/internal/servers/controller"
 	"github.com/hashicorp/boundary/internal/servers/worker"
+	"github.com/hashicorp/boundary/internal/session"
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/vault/sdk/helper/base62"
@@ -117,6 +119,9 @@ func TestWorkerSessionCleanup(t *testing.T) {
 	// likely vary.
 	actualSendRecv = testSendRecv(t, conn, 60)
 	require.Less(t, actualSendRecv, 60)
+
+	// Wait for connection to be marked as closed on the controller.
+	waitForConnectionsClosedOnController(ctx, t, c1, sar.Item.SessionId)
 
 	// Resume the connection, and reconnect.
 	proxy.Resume()
@@ -262,6 +267,9 @@ func TestWorkerSessionCleanupMultiController(t *testing.T) {
 	actualSendRecv = testSendRecv(t, conn, 60)
 	require.Less(t, actualSendRecv, 60)
 
+	// Wait for connection to be marked as closed on the controllers.
+	waitForConnectionsClosedOnController(ctx, t, c1, sar.Item.SessionId)
+
 	// Finally resume both, try again. Should behave as per normal.
 	// Resume first controller, pause second. This one should work too.
 	p1.Resume()
@@ -280,6 +288,64 @@ func TestWorkerSessionCleanupMultiController(t *testing.T) {
 	defer conn.Close()
 	actualSendRecv = testSendRecv(t, conn, 60)
 	require.Equal(t, actualSendRecv, 60)
+}
+
+// waitForConnectionsClosedOnController waits for all connections on
+// a given sessionId to transition to the closed state.
+func waitForConnectionsClosedOnController(
+	ctx context.Context,
+	t *testing.T,
+	tc *controller.TestController,
+	sessionId string) {
+	t.Helper()
+	// Set max wait to default scheduler interval * 2
+	ctx, cancel := context.WithTimeout(ctx, time.Minute*2)
+	defer cancel()
+
+	// Get all connections for the session on the controller.
+	sessionRepo, err := tc.Controller().SessionRepoFn()
+	require.NoError(t, err)
+	conns, err := sessionRepo.ListConnectionsBySessionId(ctx, sessionId)
+	require.NoError(t, err)
+	if len(conns) < 1 {
+		t.Log("WARNING: no connections returned for session, nothing to do")
+		return
+	}
+
+	// Set up the waitgroups.
+	var wg sync.WaitGroup
+	wg.Add(len(conns))
+	for _, conn := range conns {
+		go func(conn *session.Connection) {
+			for {
+				// Just let testify deal with the context handling; should
+				// break out if the context is canceled (timeout, etc).
+				require.NoError(t, ctx.Err())
+				_, states, err := sessionRepo.LookupConnection(ctx, conn.PublicId, nil)
+				require.NoError(t, err)
+				var foundClosed bool
+				// Walk all the states looking for the closed state.
+				for _, state := range states {
+					if state.Status == session.StatusClosed {
+						foundClosed = true
+						break
+					}
+				}
+
+				if foundClosed {
+					break
+				}
+
+				// Sleep 1s before checking again.
+				time.Sleep(time.Second)
+			}
+
+			wg.Done()
+		}(conn)
+	}
+
+	// Wait for all connections to be found.
+	wg.Wait()
 }
 
 // testSendRecv runs a basic send/receive test over the returned

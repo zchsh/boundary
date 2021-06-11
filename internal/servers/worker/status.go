@@ -18,7 +18,7 @@ import (
 const (
 	statusInterval           = 2 * time.Second
 	statusTimeout            = 10 * time.Second
-	defaultStatusGracePeriod = 30 * time.Second
+	defaultStatusGracePeriod = 15 * time.Second
 	statusGracePeriodEnvVar  = "BOUNDARY_STATUS_GRACE_PERIOD"
 )
 
@@ -34,7 +34,7 @@ const (
 //
 //   * BOUNDARY_STATUS_GRACE_PERIOD, if defined, can be set to an
 //   integer value to define the setting.
-//   * If this is missing, the default (30 seconds) is used.
+//   * If this is missing, the default (15 seconds) is used.
 //
 func (w *Worker) statusGracePeriod() time.Duration {
 	if v := os.Getenv(statusGracePeriodEnvVar); v != "" {
@@ -167,7 +167,6 @@ func (w *Worker) sendWorkerStatus(cancelCtx context.Context) {
 		// want to start terminating all sessions as a "break glass" kind of
 		// scenario, as there will be no way we can really tell if these
 		// connections should continue to exist.
-
 		lastStatus := w.LastStatusSuccess()
 		gracePeriod := w.statusGracePeriod()
 		if lastStatus != nil && lastStatus.StatusTime.Before(time.Now().Add(gracePeriod*-1)) {
@@ -180,10 +179,10 @@ func (w *Worker) sendWorkerStatus(cancelCtx context.Context) {
 			// our standard cleanup routine.
 			w.cleanupConnections(
 				cancelCtx,
-				cleanupConnectionsConditionNotAnyStatus(
+				cleanupWithCondition(cleanupConnectionsConditionNotAnyStatus(
 					pbs.SESSIONSTATUS_SESSIONSTATUS_CANCELING,
 					pbs.SESSIONSTATUS_SESSIONSTATUS_TERMINATED,
-				),
+				)),
 			)
 		}
 	} else {
@@ -220,6 +219,20 @@ func (w *Worker) sendWorkerStatus(cancelCtx context.Context) {
 					si.Lock()
 					si.status = sessInfo.GetStatus()
 					si.Unlock()
+					// Check for connections that should be closed.
+					connsToClose := make(map[string]struct{})
+					for _, conn := range sessInfo.Connections {
+						if conn.GetStatus() == pbs.CONNECTIONSTATUS_CONNECTIONSTATUS_CLOSED {
+							connsToClose[conn.GetConnectionId()] = struct{}{}
+						}
+					}
+
+					if len(connsToClose) > 0 {
+						w.cleanupConnections(
+							cancelCtx,
+							cleanupWithConnectionFilter(connsToClose),
+						)
+					}
 				}
 			}
 		}
@@ -229,12 +242,31 @@ func (w *Worker) sendWorkerStatus(cancelCtx context.Context) {
 	// for any canceling session or any session that is expired.
 	w.cleanupConnections(
 		cancelCtx,
-		cleanupConnectionsConditionAnyStatus(
+		cleanupWithCondition(cleanupConnectionsConditionAnyStatus(
 			pbs.SESSIONSTATUS_SESSIONSTATUS_CANCELING,
 			pbs.SESSIONSTATUS_SESSIONSTATUS_TERMINATED,
-		),
-		cleanupConnectionsConditionExpired,
+		)),
+		cleanupWithCondition(cleanupConnectionsConditionExpired),
 	)
+}
+
+type cleanupConnectionsOptions struct {
+	withConditions       []cleanupConnectionsCondition
+	withConnectionFilter map[string]struct{}
+}
+
+type cleanupConnectionsOption func(o *cleanupConnectionsOptions)
+
+func cleanupWithCondition(cond cleanupConnectionsCondition) cleanupConnectionsOption {
+	return func(o *cleanupConnectionsOptions) {
+		o.withConditions = append(o.withConditions, cond)
+	}
+}
+
+func cleanupWithConnectionFilter(filter map[string]struct{}) cleanupConnectionsOption {
+	return func(o *cleanupConnectionsOptions) {
+		o.withConnectionFilter = filter
+	}
 }
 
 type cleanupConnectionsCondition func(si *sessionInfo) bool
@@ -274,7 +306,14 @@ func cleanupConnectionsConditionExpired(si *sessionInfo) bool {
 //
 // Conditions are inclusive (OR); keep this in mind when working with
 // the function.
-func (w *Worker) cleanupConnections(cancelCtx context.Context, conditions ...cleanupConnectionsCondition) {
+func (w *Worker) cleanupConnections(cancelCtx context.Context, opts ...cleanupConnectionsOption) {
+	cleanupOpts := &cleanupConnectionsOptions{
+		withConnectionFilter: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(cleanupOpts)
+	}
+
 	closeInfo := make(map[string]string)
 	cleanSessionIds := make([]string, 0)
 	w.sessionInfoMap.Range(func(key, value interface{}) bool {
@@ -282,7 +321,7 @@ func (w *Worker) cleanupConnections(cancelCtx context.Context, conditions ...cle
 		si.Lock()
 		defer si.Unlock()
 		var condMatched bool
-		for _, cond := range conditions {
+		for _, cond := range cleanupOpts.withConditions {
 			if cond(si) {
 				condMatched = true
 			}
@@ -295,6 +334,12 @@ func (w *Worker) cleanupConnections(cancelCtx context.Context, conditions ...cle
 
 		var toClose int
 		for k, v := range si.connInfoMap {
+			if len(cleanupOpts.withConnectionFilter) > 0 {
+				if _, ok := cleanupOpts.withConnectionFilter[k]; !ok {
+					continue
+				}
+			}
+
 			if v.closeTime.IsZero() {
 				toClose++
 				v.connCancel()

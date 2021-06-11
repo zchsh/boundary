@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/boundary/api"
 	"github.com/hashicorp/boundary/api/authmethods"
@@ -128,6 +129,11 @@ func (tc *TestController) DbConn() *gorm.DB {
 
 func (tc *TestController) Logger() hclog.Logger {
 	return tc.b.Logger
+}
+
+func (tc *TestController) SessionCleanupSatusGracePeriod() time.Duration {
+	j := &sessionCleanupJob{logger: tc.b.Logger}
+	return j.statusGracePeriod()
 }
 
 func (tc *TestController) Token() *authtokens.AuthToken {

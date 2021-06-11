@@ -30,9 +30,14 @@ type testController struct {
 	statusRequests     []statusRequestDetail
 	connCancelRequests []string
 	statusErr          error
+	withCloseConns     map[string]struct{}
 }
 
 var testStatusErr = errors.New("Status: test failure")
+
+func (c *testController) lastStatusRequest() statusRequestDetail {
+	return c.statusRequests[len(c.statusRequests)-1]
+}
 
 // ServerCoordinationServiceClient impl.
 func (c *testController) Status(
@@ -44,12 +49,39 @@ func (c *testController) Status(
 		sessions: make(map[string]sessionDetail),
 	}
 
+	ret := new(pbs.StatusResponse)
 	for _, j := range in.Jobs {
 		jobInfo := j.Job.JobInfo.(*pbs.Job_SessionInfo)
 		sessionId := jobInfo.SessionInfo.SessionId
 		connIds := make([]string, len(jobInfo.SessionInfo.Connections))
-		for i, c := range jobInfo.SessionInfo.Connections {
-			connIds[i] = c.ConnectionId
+		for i, conn := range jobInfo.SessionInfo.Connections {
+			if c.withCloseConns != nil {
+				var connChanges []*pbs.Connection
+				if _, ok := c.withCloseConns[conn.ConnectionId]; ok {
+					connChanges = append(connChanges, &pbs.Connection{
+						ConnectionId: conn.ConnectionId,
+						Status:       pbs.CONNECTIONSTATUS_CONNECTIONSTATUS_CLOSED,
+					})
+				}
+
+				if len(connChanges) > 0 {
+					ret.JobsRequests = append(ret.JobsRequests, &pbs.JobChangeRequest{
+						Job: &pbs.Job{
+							Type: pbs.JOBTYPE_JOBTYPE_SESSION,
+							JobInfo: &pbs.Job_SessionInfo{
+								SessionInfo: &pbs.SessionJobInfo{
+									SessionId:   sessionId,
+									Status:      jobInfo.SessionInfo.Status,
+									Connections: connChanges,
+								},
+							},
+						},
+						RequestType: pbs.CHANGETYPE_CHANGETYPE_UPDATE_STATE,
+					})
+				}
+			}
+
+			connIds[i] = conn.ConnectionId
 		}
 		detail.sessions[sessionId] = sessionDetail{
 			status:        jobInfo.SessionInfo.Status,
@@ -62,7 +94,7 @@ func (c *testController) Status(
 		return nil, c.statusErr
 	}
 
-	return new(pbs.StatusResponse), nil
+	return ret, nil
 }
 
 // SessionServiceClient impl.
@@ -223,29 +255,27 @@ func TestSendWorkerStatus(t *testing.T) {
 	w.sendWorkerStatus(context.Background())
 
 	// Assert sessions/conns sent status
-	assert.Equal(t, c.statusRequests, []statusRequestDetail{
-		{
-			sessions: map[string]sessionDetail{
-				"foo-sess": sessionDetail{
-					status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
-					connectionIds: []string{"foo-conn"},
-				},
-				"bar-sess": sessionDetail{
-					status:        pbs.SESSIONSTATUS_SESSIONSTATUS_PENDING,
-					connectionIds: []string{"bar-conn"},
-				},
-				"canceling-sess": sessionDetail{
-					status:        pbs.SESSIONSTATUS_SESSIONSTATUS_CANCELING,
-					connectionIds: []string{"canceling-conn"},
-				},
-				"terminated-sess": sessionDetail{
-					status:        pbs.SESSIONSTATUS_SESSIONSTATUS_TERMINATED,
-					connectionIds: []string{"terminated-conn"},
-				},
-				"expired-sess": sessionDetail{
-					status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
-					connectionIds: []string{"expired-conn"},
-				},
+	assert.Equal(t, c.lastStatusRequest(), statusRequestDetail{
+		sessions: map[string]sessionDetail{
+			"foo-sess": sessionDetail{
+				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
+				connectionIds: []string{"foo-conn"},
+			},
+			"bar-sess": sessionDetail{
+				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_PENDING,
+				connectionIds: []string{"bar-conn"},
+			},
+			"canceling-sess": sessionDetail{
+				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_CANCELING,
+				connectionIds: []string{"canceling-conn"},
+			},
+			"terminated-sess": sessionDetail{
+				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_TERMINATED,
+				connectionIds: []string{"terminated-conn"},
+			},
+			"expired-sess": sessionDetail{
+				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
+				connectionIds: []string{"expired-conn"},
 			},
 		},
 	})
@@ -266,7 +296,7 @@ func TestSendWorkerStatus(t *testing.T) {
 	// Call again and check reap
 	w.sendWorkerStatus(context.Background())
 	// Check last call detail
-	assert.Equal(t, c.statusRequests[len(c.statusRequests)-1], statusRequestDetail{
+	assert.Equal(t, c.lastStatusRequest(), statusRequestDetail{
 		sessions: map[string]sessionDetail{
 			"foo-sess": sessionDetail{
 				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
@@ -301,7 +331,7 @@ func TestSendWorkerStatus(t *testing.T) {
 	// Final call - should be a no-op
 	w.sendWorkerStatus(context.Background())
 	// Last call detail should just contain connected connections now
-	assert.Equal(t, c.statusRequests[len(c.statusRequests)-1], statusRequestDetail{
+	assert.Equal(t, c.lastStatusRequest(), statusRequestDetail{
 		sessions: map[string]sessionDetail{
 			"foo-sess": sessionDetail{
 				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
@@ -337,17 +367,15 @@ func TestSendWorkerStatusError(t *testing.T) {
 	w.sendWorkerStatus(context.Background())
 
 	// Assert sessions/conns sent status
-	assert.Equal(t, c.statusRequests, []statusRequestDetail{
-		{
-			sessions: map[string]sessionDetail{
-				"foo-sess": sessionDetail{
-					status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
-					connectionIds: []string{"foo-conn"},
-				},
-				"bar-sess": sessionDetail{
-					status:        pbs.SESSIONSTATUS_SESSIONSTATUS_PENDING,
-					connectionIds: []string{"bar-conn"},
-				},
+	assert.Equal(t, c.lastStatusRequest(), statusRequestDetail{
+		sessions: map[string]sessionDetail{
+			"foo-sess": sessionDetail{
+				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
+				connectionIds: []string{"foo-conn"},
+			},
+			"bar-sess": sessionDetail{
+				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_PENDING,
+				connectionIds: []string{"bar-conn"},
 			},
 		},
 	})
@@ -365,7 +393,7 @@ func TestSendWorkerStatusError(t *testing.T) {
 	w.sendWorkerStatus(context.Background())
 
 	// Assert sessions/conns sent status (should be same)
-	assert.Equal(t, c.statusRequests[len(c.statusRequests)-1], statusRequestDetail{
+	assert.Equal(t, c.lastStatusRequest(), statusRequestDetail{
 		sessions: map[string]sessionDetail{
 			"foo-sess": sessionDetail{
 				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
@@ -397,7 +425,7 @@ func TestSendWorkerStatusError(t *testing.T) {
 	w.sendWorkerStatus(context.Background())
 	// Check last call detail. Session status should never change
 	// throughout this process.
-	assert.Equal(t, c.statusRequests[len(c.statusRequests)-1], statusRequestDetail{
+	assert.Equal(t, c.lastStatusRequest(), statusRequestDetail{
 		sessions: map[string]sessionDetail{
 			"foo-sess": sessionDetail{
 				status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
@@ -416,4 +444,107 @@ func TestSendWorkerStatusError(t *testing.T) {
 		return true
 	})
 	assert.Zero(t, sessionMapLen)
+}
+
+func TestSendWorkerStatusCloseConn(t *testing.T) {
+	cases := []struct {
+		name  string
+		conns map[string]struct{}
+	}{
+		{
+			name: "single",
+			conns: map[string]struct{}{
+				"foo-conn": struct{}{},
+			},
+		},
+		{
+			name: "multi",
+			conns: map[string]struct{}{
+				"foo-conn": struct{}{},
+				"bar-conn": struct{}{},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := new(testController)
+			w, err := testWorker(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			assert.NotNil(t, w)
+
+			// Just add the connected sessions
+			testSessionInfoMapConnected(w.sessionInfoMap, c)
+
+			// Set connections to close
+			c.withCloseConns = tc.conns
+
+			w.sendWorkerStatus(context.Background())
+
+			assert.Equal(t, c.lastStatusRequest(), statusRequestDetail{
+				sessions: map[string]sessionDetail{
+					"foo-sess": sessionDetail{
+						status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
+						connectionIds: []string{"foo-conn"},
+					},
+					"bar-sess": sessionDetail{
+						status:        pbs.SESSIONSTATUS_SESSIONSTATUS_PENDING,
+						connectionIds: []string{"bar-conn"},
+					},
+				},
+			})
+
+			// Assert a successful status
+			lastStatus := w.LastStatusSuccess()
+			assert.NotNil(t, lastStatus)
+
+			// Assert connection close requests against the list that we
+			// asked to be closed.
+			missing := tc.conns
+			for _, connId := range c.connCancelRequests {
+				delete(missing, connId)
+			}
+
+			// Assert all of our cancellation requests were made
+			assert.Zero(t, missing)
+
+			// Assert cancellation reaps
+			var sessionMapLen int
+
+			// Reaps do not happen immediately after cancellation
+			w.sessionInfoMap.Range(func(key, value interface{}) bool {
+				sessionMapLen++
+				return true
+			})
+			assert.Equal(t, 2, sessionMapLen)
+
+			// Call again and check reap
+			w.sendWorkerStatus(context.Background())
+
+			// Check last call detail. Session status should never change
+			// throughout this process.
+			assert.Equal(t, c.lastStatusRequest(), statusRequestDetail{
+				sessions: map[string]sessionDetail{
+					"foo-sess": sessionDetail{
+						status:        pbs.SESSIONSTATUS_SESSIONSTATUS_ACTIVE,
+						connectionIds: []string{"foo-conn"},
+					},
+					"bar-sess": sessionDetail{
+						status:        pbs.SESSIONSTATUS_SESSIONSTATUS_PENDING,
+						connectionIds: []string{"bar-conn"},
+					},
+				},
+			})
+
+			// Session map should how be original - canceled
+			sessionMapLen = 0
+			w.sessionInfoMap.Range(func(key, value interface{}) bool {
+				sessionMapLen++
+				return true
+			})
+			assert.Equal(t, 2-len(tc.conns), sessionMapLen)
+		})
+	}
 }
